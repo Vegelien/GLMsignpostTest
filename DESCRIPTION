@@ -1,0 +1,17 @@
+Package: GLMsignpostTest
+Title: GLM signpost test functions
+Version: 0.0.0.9000
+Authors@R: 
+    person("Alexandra", "Vegelien", email = "a.g.j.vegelien@vu.nl", role = c("aut", "cre"))
+Description: What the package does (one paragraph).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Depends: 
+    R (>= 3.5.0),
+    DBI,
+    RSQLite
+Imports:
+    pracma,
+    parallel
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
