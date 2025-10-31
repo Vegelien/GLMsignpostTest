@@ -339,9 +339,23 @@ insert_power_results_batch <- function(con, param_id, p_val_matrix, replicate_st
   )
   
   stmt <- dbSendStatement(con, query)
-  
+
   for (i in seq_len(nrow(p_val_matrix))) {
-    dbBind(stmt, c(param_id, replicate_start + i - 1, as.list(p_val_matrix[i, ])))
+    row_values <- as.list(p_val_matrix[i, ])
+
+    if (length(row_values) != num_gammas) {
+      stop(
+        sprintf(
+          "Row %d has %d values but %d columns were expected for binding.",
+          i,
+          length(row_values),
+          num_gammas
+        )
+      )
+    }
+
+    params <- c(list(param_id, replicate_start + i - 1), row_values)
+    dbBind(stmt, params)
   }
   
   dbClearResult(stmt)
@@ -357,6 +371,20 @@ insert_estimation_results_batch <- function(con, param_id, estimation_id,
   }
   
   num_gammas <- ncol(theta_hat_matrix)
+
+  if (ncol(target_loss_matrix) != num_gammas || ncol(null_loss_matrix) != num_gammas) {
+    stop(
+      sprintf(
+        "Column count mismatch: expected %d columns for each matrix (theta_hat, target_loss, null_loss).",
+        num_gammas
+      )
+    )
+  }
+
+  if (nrow(target_loss_matrix) != nrow(theta_hat_matrix) ||
+      nrow(null_loss_matrix) != nrow(theta_hat_matrix)) {
+    stop("Row count mismatch across input matrices for binding.")
+  }
   theta_cols <- paste0("theta_hat", sprintf("%02d", seq_len(num_gammas) - 1))
   target_loss_cols <- paste0("target_loss", sprintf("%02d", seq_len(num_gammas) - 1))
   null_loss_cols <- paste0("null_loss", sprintf("%02d", seq_len(num_gammas) - 1))
@@ -370,16 +398,47 @@ insert_estimation_results_batch <- function(con, param_id, estimation_id,
   )
   
   stmt <- dbSendStatement(con, query)
-  
+
   for (i in seq_len(nrow(theta_hat_matrix))) {
-    dbBind(stmt, c(
-      param_id, 
-      estimation_id, 
-      replicate_start + i - 1,
-      as.list(theta_hat_matrix[i, ]),
-      as.list(target_loss_matrix[i, ]),
-      as.list(null_loss_matrix[i, ])
-    ))
+    theta_row <- as.list(theta_hat_matrix[i, ])
+    target_row <- as.list(target_loss_matrix[i, ])
+    null_row <- as.list(null_loss_matrix[i, ])
+
+    if (length(theta_row) != num_gammas ||
+        length(target_row) != num_gammas ||
+        length(null_row) != num_gammas) {
+      stop(
+        sprintf(
+          "Row %d has mismatched column counts (theta: %d, target_loss: %d, null_loss: %d; expected %d).",
+          i,
+          length(theta_row),
+          length(target_row),
+          length(null_row),
+          num_gammas
+        )
+      )
+    }
+
+    params <- c(
+      list(param_id, estimation_id, replicate_start + i - 1),
+      theta_row,
+      target_row,
+      null_row
+    )
+
+    expected_param_count <- length(all_cols) + 3
+    if (length(params) != expected_param_count) {
+      stop(
+        sprintf(
+          "Row %d binding produced %d parameters but %d columns were expected.",
+          i,
+          length(params),
+          expected_param_count
+        )
+      )
+    }
+
+    dbBind(stmt, params)
   }
   
   dbClearResult(stmt)
