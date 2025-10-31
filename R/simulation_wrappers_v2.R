@@ -43,7 +43,7 @@ library(porridge)
 #' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
 #' @param B_power Number of replicates
 #' @param B_X Number of design matrices (for AS test only)
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 0.5)
+#' @param gammas Gamma grid of length <= 6 (default: 0, 0.1, ..., 0.5)
 run_and_store_power_simulations <- function(
     db_path = "power_simulations.db",
     n_grid = c(10, 20, 40, 60, 80, 100, 150),
@@ -58,7 +58,21 @@ run_and_store_power_simulations <- function(
     B_X = 10,
     gammas = seq(0, 0.5, by = 0.1)
 ) {
-  
+
+  max_power_gammas <- 6L
+  if (length(gammas) > max_power_gammas) {
+    stop(
+      sprintf(
+        paste0(
+          "The power database schema supports at most %d gamma values. ",
+          "Received %d values in 'gammas'."
+        ),
+        max_power_gammas,
+        length(gammas)
+      )
+    )
+  }
+
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
@@ -156,7 +170,7 @@ run_and_store_power_simulations <- function(
 #' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
 #' @param lambda_est Ridge penalty for loss calculation (glmnet scale)
 #' @param B_power Number of replicates
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
+#' @param gammas Gamma grid of length <= 11 (default: 0, 0.1, ..., 1.0)
 #' @return List with theta_hats, target_loss, null_loss matrices
 estimation_simulation <- function(n, p, lambda, model,
                                   misspecified = FALSE,
@@ -265,7 +279,7 @@ estimation_simulation <- function(n, p, lambda, model,
 #' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
 #' @param lambda_est Ridge penalty for loss calculation (glmnet scale)
 #' @param B_power Number of replicates
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
+#' @param gammas Gamma grid of length <= 11 (default: 0, 0.1, ..., 1.0)
 run_and_store_estimation_simulations <- function(
     db_path = "estimation_simulations.db",
     n_grid = c(10, 50, 150),
@@ -279,7 +293,21 @@ run_and_store_estimation_simulations <- function(
     B_power = 10,
     gammas = seq(0, 1, by = 0.1)
 ) {
-  
+
+  max_estimation_gammas <- 11L
+  if (length(gammas) > max_estimation_gammas) {
+    stop(
+      sprintf(
+        paste0(
+          "The estimation database schema supports at most %d gamma values. ",
+          "Received %d values in 'gammas'."
+        ),
+        max_estimation_gammas,
+        length(gammas)
+      )
+    )
+  }
+
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
