@@ -103,6 +103,8 @@ run_and_store_power_simulations <- function(
             beta_source = beta_source
           )
 
+          current_max_replicate <- get_max_power_replicate_id(con, param_id)
+
           # Determine parameters for simulation
           estimate_beta <- !is.null(n_beta)
           misspecified <- (spec == "misspecified")
@@ -142,10 +144,15 @@ run_and_store_power_simulations <- function(
               scaled = TRUE
             )
           }
-          
+
           # Extract ONLY p-values and insert
-          insert_power_results_batch(con, param_id, result$p_values)
-          
+          insert_power_results_batch(
+            con,
+            param_id,
+            result$p_values,
+            replicate_start = current_max_replicate + 1
+          )
+
           message(sprintf("  ✓ Stored %d replicates", nrow(result$p_values)))
         }
       }
@@ -343,12 +350,18 @@ run_and_store_estimation_simulations <- function(
           con, n, p, lambda, model, spec, n_beta, lambda_beta,
           beta_source = beta_source
         )
-        
+
+        current_max_replicate <- get_max_estimation_replicate_id(
+          con,
+          param_id,
+          estimation_id
+        )
+
         # Run simulation
         misspecified <- (spec == "misspecified")
-        
+
         result <- estimation_simulation(
-          n = n, 
+          n = n,
           p = p, 
           lambda = lambda,  # Will be multiplied by n inside function
           model = model,
@@ -360,13 +373,14 @@ run_and_store_estimation_simulations <- function(
           gammas = gammas,
           scaled = TRUE
         )
-        
+
         # Insert results
         insert_estimation_results_batch(
-          con, param_id, estimation_id, 
-          result$theta_hats, result$target_loss, result$null_loss
+          con, param_id, estimation_id,
+          result$theta_hats, result$target_loss, result$null_loss,
+          replicate_start = current_max_replicate + 1
         )
-        
+
         message(sprintf("  ✓ Stored %d replicates", nrow(result$theta_hats)))
       }
     }

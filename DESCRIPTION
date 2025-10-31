@@ -13,7 +13,10 @@ Depends:
 Imports:
     pracma,
     parallel
+Suggests:
+    testthat (>= 3.0.0)
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 URL: https://github.com/Vegelien/GLMsignpostTest
 BugReports: https://github.com/Vegelien/GLMsignpostTest/issues
+Config/testthat/edition: 3

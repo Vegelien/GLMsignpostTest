@@ -224,6 +224,24 @@ get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model
 }
 
 
+#' Get maximum replicate ID for a power simulation parameter set
+#'
+#' @param con A database connection.
+#' @param param_id The ID of the parameters whose replicates are requested.
+#'
+#' @return An integer giving the maximum replicate ID stored for the parameter
+#'   set, or 0 when no replicates have been stored yet.
+#' @export
+get_max_power_replicate_id <- function(con, param_id) {
+  query <- "SELECT COALESCE(MAX(replicate_id), 0) AS max_replicate
+            FROM results
+            WHERE param_id = ?;"
+
+  res <- dbGetQuery(con, query, params = list(param_id))
+  res$max_replicate[[1]]
+}
+
+
 #' Get or Insert Parameter ID (Estimation Database)
 #'
 #' @param beta_source Character string indicating whether betas are treated as
@@ -265,6 +283,26 @@ get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model,
 
     return(dbGetQuery(con, "SELECT last_insert_rowid();")[1, 1])
   }
+}
+
+
+#' Get maximum replicate ID for an estimation simulation parameter set
+#'
+#' @param con A database connection.
+#' @param param_id The ID of the parameters whose replicates are requested.
+#' @param estimation_id The ID of the estimation-settings row.
+#'
+#' @return An integer giving the maximum replicate ID stored for the
+#'   combination of parameter and estimation settings, or 0 when no replicates
+#'   have been stored yet.
+#' @export
+get_max_estimation_replicate_id <- function(con, param_id, estimation_id) {
+  query <- "SELECT COALESCE(MAX(replicate_id), 0) AS max_replicate
+            FROM results
+            WHERE param_id = ? AND estimation_id = ?;"
+
+  res <- dbGetQuery(con, query, params = list(param_id, estimation_id))
+  res$max_replicate[[1]]
 }
 
 
