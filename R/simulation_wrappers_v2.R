@@ -43,7 +43,7 @@ library(porridge)
 #' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
 #' @param B_power Number of replicates
 #' @param B_X Number of design matrices (for AS test only)
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 0.5)
+#' @param gammas Gamma grid of length <= 6 (default: 0, 0.1, ..., 0.5)
 run_and_store_power_simulations <- function(
     db_path = "power_simulations.db",
     n_grid = c(10, 20, 40, 60, 80, 100, 150),
@@ -58,7 +58,21 @@ run_and_store_power_simulations <- function(
     B_X = 10,
     gammas = seq(0, 0.5, by = 0.1)
 ) {
-  
+
+  max_power_gammas <- 6L
+  if (length(gammas) > max_power_gammas) {
+    stop(
+      sprintf(
+        paste0(
+          "The power database schema supports at most %d gamma values. ",
+          "Received %d values in 'gammas'."
+        ),
+        max_power_gammas,
+        length(gammas)
+      )
+    )
+  }
+
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
@@ -80,11 +94,17 @@ run_and_store_power_simulations <- function(
                           sim_count, total_sims, n, test_type, spec, 
                           ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
           
+          # Determine beta source for database storage
+          beta_source <- if (is.null(n_beta)) "oracle" else "estimated"
+
           # Get or insert parameter ID
           param_id <- get_or_insert_power_param_id(
-            con, n, p, lambda, test_type, model, spec, n_beta, lambda_beta
+            con, n, p, lambda, test_type, model, spec, n_beta, lambda_beta,
+            beta_source = beta_source
           )
-          
+
+          current_max_replicate <- get_max_power_replicate_id(con, param_id)
+
           # Determine parameters for simulation
           estimate_beta <- !is.null(n_beta)
           misspecified <- (spec == "misspecified")
@@ -124,10 +144,15 @@ run_and_store_power_simulations <- function(
               scaled = TRUE
             )
           }
-          
+
           # Extract ONLY p-values and insert
-          insert_power_results_batch(con, param_id, result$p_values)
-          
+          insert_power_results_batch(
+            con,
+            param_id,
+            result$p_values,
+            replicate_start = current_max_replicate + 1
+          )
+
           message(sprintf("  ✓ Stored %d replicates", nrow(result$p_values)))
         }
       }
@@ -156,7 +181,7 @@ run_and_store_power_simulations <- function(
 #' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
 #' @param lambda_est Ridge penalty for loss calculation (glmnet scale)
 #' @param B_power Number of replicates
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
+#' @param gammas Gamma grid of length <= 11 (default: 0, 0.1, ..., 1.0)
 #' @return List with theta_hats, target_loss, null_loss matrices
 estimation_simulation <- function(n, p, lambda, model,
                                   misspecified = FALSE,
@@ -265,7 +290,7 @@ estimation_simulation <- function(n, p, lambda, model,
 #' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
 #' @param lambda_est Ridge penalty for loss calculation (glmnet scale)
 #' @param B_power Number of replicates
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
+#' @param gammas Gamma grid of length <= 11 (default: 0, 0.1, ..., 1.0)
 run_and_store_estimation_simulations <- function(
     db_path = "estimation_simulations.db",
     n_grid = c(10, 50, 150),
@@ -279,7 +304,21 @@ run_and_store_estimation_simulations <- function(
     B_power = 10,
     gammas = seq(0, 1, by = 0.1)
 ) {
-  
+
+  max_estimation_gammas <- 11L
+  if (length(gammas) > max_estimation_gammas) {
+    stop(
+      sprintf(
+        paste0(
+          "The estimation database schema supports at most %d gamma values. ",
+          "Received %d values in 'gammas'."
+        ),
+        max_estimation_gammas,
+        length(gammas)
+      )
+    )
+  }
+
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
   
@@ -303,16 +342,26 @@ run_and_store_estimation_simulations <- function(
                         sim_count, total_sims, n, spec, 
                         ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
         
+        # Determine beta source for database storage
+        beta_source <- if (is.null(n_beta)) "oracle" else "estimated"
+
         # Get or insert parameter ID
         param_id <- get_or_insert_estimation_param_id(
-          con, n, p, lambda, model, spec, n_beta, lambda_beta
+          con, n, p, lambda, model, spec, n_beta, lambda_beta,
+          beta_source = beta_source
         )
-        
+
+        current_max_replicate <- get_max_estimation_replicate_id(
+          con,
+          param_id,
+          estimation_id
+        )
+
         # Run simulation
         misspecified <- (spec == "misspecified")
-        
+
         result <- estimation_simulation(
-          n = n, 
+          n = n,
           p = p, 
           lambda = lambda,  # Will be multiplied by n inside function
           model = model,
@@ -324,13 +373,14 @@ run_and_store_estimation_simulations <- function(
           gammas = gammas,
           scaled = TRUE
         )
-        
+
         # Insert results
         insert_estimation_results_batch(
-          con, param_id, estimation_id, 
-          result$theta_hats, result$target_loss, result$null_loss
+          con, param_id, estimation_id,
+          result$theta_hats, result$target_loss, result$null_loss,
+          replicate_start = current_max_replicate + 1
         )
-        
+
         message(sprintf("  ✓ Stored %d replicates", nrow(result$theta_hats)))
       }
     }

@@ -139,7 +139,21 @@ insert_simulation_results_batch <- function(con, param_id, p_val_matrix) {
 
   # Loop over each row and insert values
   for (i in seq_len(nrow(p_val_matrix))) {
-    dbBind(stmt, c(param_id, as.list(p_val_matrix[i, ])))  # Convert row to list
+    row_values <- as.list(p_val_matrix[i, ])
+
+    if (length(row_values) != num_gammas) {
+      stop(
+        sprintf(
+          "Row %d has %d values but %d columns were expected for binding.",
+          i,
+          length(row_values),
+          num_gammas
+        )
+      )
+    }
+
+    params <- c(list(param_id), row_values)
+    dbBind(stmt, params)
   }
 
   dbClearResult(stmt)  # Free up resources
