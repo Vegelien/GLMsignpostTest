@@ -65,10 +65,10 @@ get_or_insert_param_id <- function(con, n, p, lambda, test_type, GLM_model, B_nu
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
   # Check if parameters already exist
   query <- "SELECT id FROM parameters WHERE n = ? AND p = ? AND lambda = ? AND
-            test_type = ? AND GLM_model = ? AND B_null_distr = ? AND X = ? AND beta = ? AND 
-            (n_beta IS ? OR n_beta = ?) AND (lambda_beta IS ? OR lambda_beta = ?);"
-  
-  existing_id <- dbGetQuery(con, query, params = list(n, p, lambda, test_type, GLM_model, B_null_distr, X, beta, 
+            test_type = ? AND GLM_model = ? AND B_null_distr = ? AND X = ? AND beta = ? AND
+            ((? IS NULL AND n_beta IS NULL) OR n_beta = ?) AND ((? IS NULL AND lambda_beta IS NULL) OR lambda_beta = ?);"
+
+  existing_id <- dbGetQuery(con, query, params = list(n, p, lambda, test_type, GLM_model, B_null_distr, X, beta,
                                                       n_beta, n_beta, lambda_beta, lambda_beta))
   
   if (nrow(existing_id) > 0) {
