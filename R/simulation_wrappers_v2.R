@@ -6,11 +6,6 @@
 # - power_LR_test_extended()
 # Plus creates a new function for theta_hat and loss estimation
 # ============================================================================
-
-library(DBI)
-library(RSQLite)
-library(dplyr)
-library(porridge)
 # Source your files (adjust paths as needed)
 # source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/GLMsignpostTest/R/simulationFunctions.R")
 # source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/GLMsignpostTest/R/signpostTestFunctions.R")
@@ -28,22 +23,41 @@ library(porridge)
 # ============================================================================
 
 #' Run and Store Power Simulations
-#' 
-#' Uses power_signpost_test_extended_AS() and power_LR_test_extended()
-#' from simulationFunctions.R but stores ONLY p-values
-#' 
-#' @param db_path Path to power database
-#' @param n_grid Vector of sample sizes
-#' @param p Number of predictors
-#' @param lambda Ridge penalty for theta estimation
-#' @param test_types c("AS_SW_plugin", "LR")
-#' @param model "logistic" or "poisson"
-#' @param specifications c("well_specified", "misspecified")
-#' @param n_beta_values list(NULL, 300) - NULL=oracle, number=estimated
-#' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
-#' @param B_power Number of replicates
-#' @param B_X Number of design matrices (for AS test only)
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 0.5)
+#'
+#' Wraps [`power_signpost_test_extended_AS()`] and
+#' [`power_LR_test_extended()`] to execute batches of simulations and persist
+#' the resulting p-values to the power simulation database.
+#'
+#' @param db_path Path to the SQLite database that stores power simulations.
+#' @param n_grid Integer vector of sample sizes.
+#' @param p Integer number of predictors.
+#' @param lambda Numeric ridge penalty for theta estimation.
+#' @param test_types Character vector of test identifiers (e.g.
+#'   `c("AS_SW_plugin", "LR")`).
+#' @param model Character string selecting the GLM family (either
+#'   `"logistic"` or `"poisson"`).
+#' @param specifications Character vector describing whether each run should be
+#'   well specified or misspecified.
+#' @param n_beta_values List containing `NULL` (oracle) and/or integers for the
+#'   working coefficient sample sizes.
+#' @param lambda_beta Numeric ridge penalty used for coefficient estimation on
+#'   the glmnet scale.
+#' @param B_power Integer number of Monte Carlo replicates.
+#' @param B_X Integer number of design matrices used by the AS test.
+#' @param gammas Numeric vector of gamma values. Defaults to `seq(0, 0.5, by = 0.1)`.
+#'
+#' @return Invisibly returns `NULL`. Called for its side effects.
+#' @export
+#'
+#' @importFrom DBI dbConnect dbDisconnect dbListTables
+#' @importFrom RSQLite SQLite
+#' @examples
+#' \dontrun{
+#' tmp_db <- tempfile(fileext = ".sqlite")
+#' initialize_power_database(tmp_db)
+#' run_and_store_power_simulations(db_path = tmp_db, B_power = 2, B_X = 2,
+#'                                 n_grid = c(10, 20), gammas = c(0, 0.1))
+#' }
 run_and_store_power_simulations <- function(
     db_path = "power_simulations.db",
     n_grid = c(10, 20, 40, 60, 80, 100, 150),
@@ -142,22 +156,43 @@ run_and_store_power_simulations <- function(
 # ESTIMATION SIMULATIONS (theta_hat and loss)
 # ============================================================================
 
-#' Estimation Simulation Function for Theta_hat and Loss
-#' 
-#' Similar to power functions but with gamma = 0, 0.1, ..., 1.0
-#' and WITHOUT p-value calculation
-#' 
-#' @param n Sample size
-#' @param p Number of predictors
-#' @param lambda Ridge penalty for theta estimation
-#' @param model "logistic" or "poisson"
-#' @param misspecified Logical
-#' @param n_beta Sample size for beta estimation (NULL for oracle)
-#' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
-#' @param lambda_est Ridge penalty for loss calculation (glmnet scale)
-#' @param B_power Number of replicates
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
-#' @return List with theta_hats, target_loss, null_loss matrices
+#' Run Estimation Simulations for Theta-hat and Loss Summaries
+#'
+#' Generates Monte Carlo samples to approximate the distribution of theta-hat
+#' as well as target and null losses over a supplied gamma grid.
+#'
+#' @param n Integer sample size.
+#' @param p Integer number of predictors.
+#' @param lambda Numeric ridge penalty for theta estimation.
+#' @param model Character string selecting the GLM family (either
+#'   `"logistic"` or `"poisson"`).
+#' @param misspecified Logical flag indicating whether the working model is
+#'   misspecified.
+#' @param n_beta Optional integer sample size used to estimate working
+#'   coefficients. Use `NULL` for oracle coefficients.
+#' @param lambda_beta Numeric ridge penalty (glmnet scale) for coefficient
+#'   estimation.
+#' @param lambda_est Numeric ridge penalty (glmnet scale) used when computing
+#'   losses.
+#' @param B_power Integer number of Monte Carlo replicates.
+#' @param gammas Numeric vector of gamma values. Defaults to `seq(0, 1, by = 0.1)`.
+#' @param scaled Logical, forwarded to the helper routines to signal whether
+#'   the ridge penalties are provided on the scaled or unscaled scale.
+#'
+#' @return A list containing matrices `theta_hats`, `target_loss`, and
+#'   `null_loss`.
+#' @export
+#'
+#' @importFrom porridge create_progress_reporter
+#' @examples
+#' \dontrun{
+#' sim <- estimation_simulation(
+#'   n = 10, p = 20, lambda = Inf, model = "logistic",
+#'   n_beta = NULL, lambda_beta = 2, lambda_est = 0.5,
+#'   B_power = 2, gammas = c(0, 0.5)
+#' )
+#' str(sim)
+#' }
 estimation_simulation <- function(n, p, lambda, model,
                                   misspecified = FALSE,
                                   n_beta = NULL, 
@@ -254,18 +289,42 @@ estimation_simulation <- function(n, p, lambda, model,
 
 
 #' Run and Store Estimation Simulations
-#' 
-#' @param db_path Path to estimation database
-#' @param n_grid Vector of sample sizes
-#' @param p Number of predictors
-#' @param lambda Ridge penalty for theta estimation
-#' @param model "logistic" or "poisson"
-#' @param specifications c("well_specified", "misspecified")
-#' @param n_beta_values list(NULL, 300) - NULL=oracle, number=estimated
-#' @param lambda_beta Ridge penalty for beta estimation (glmnet scale)
-#' @param lambda_est Ridge penalty for loss calculation (glmnet scale)
-#' @param B_power Number of replicates
-#' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
+#'
+#' Executes [estimation_simulation()] across grids of sample sizes, model
+#' specifications, and coefficient estimation settings, storing the resulting
+#' summaries in the estimation simulation database.
+#'
+#' @param db_path Path to the SQLite database that stores estimation
+#'   simulations.
+#' @param n_grid Integer vector of sample sizes.
+#' @param p Integer number of predictors.
+#' @param lambda Numeric ridge penalty for theta estimation.
+#' @param model Character string selecting the GLM family (either
+#'   `"logistic"` or `"poisson"`).
+#' @param specifications Character vector describing whether each run should be
+#'   well specified or misspecified.
+#' @param n_beta_values List containing `NULL` (oracle) and/or integers for the
+#'   working coefficient sample sizes.
+#' @param lambda_beta Numeric ridge penalty (glmnet scale) used when estimating
+#'   working coefficients.
+#' @param lambda_est Numeric ridge penalty (glmnet scale) used in the loss
+#'   calculation.
+#' @param B_power Integer number of Monte Carlo replicates.
+#' @param gammas Numeric vector of gamma values. Defaults to `seq(0, 1, by = 0.1)`.
+#'
+#' @return Invisibly returns `NULL`. Called for its side effects.
+#' @export
+#'
+#' @importFrom DBI dbConnect dbDisconnect dbListTables
+#' @importFrom RSQLite SQLite
+#' @examples
+#' \dontrun{
+#' tmp_db <- tempfile(fileext = ".sqlite")
+#' initialize_estimation_database(tmp_db)
+#' run_and_store_estimation_simulations(
+#'   db_path = tmp_db, B_power = 2, n_grid = c(10, 20), gammas = c(0, 0.5)
+#' )
+#' }
 run_and_store_estimation_simulations <- function(
     db_path = "estimation_simulations.db",
     n_grid = c(10, 50, 150),

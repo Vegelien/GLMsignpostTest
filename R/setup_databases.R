@@ -6,13 +6,24 @@
 # 2. estimation_simulations.db - for theta_hat and loss calculations
 # ============================================================================
 
-library(DBI)
-library(RSQLite)
-
 # ============================================================================
 # POWER SIMULATIONS DATABASE
 # ============================================================================
 
+#' Create the Power Simulation Database Schema
+#'
+#' The power simulation database stores simulation parameters and p-values
+#' produced by the power study wrapper functions. The schema is created if it
+#' does not already exist. The function is safe to call repeatedly on the same
+#' database connection.
+#'
+#' @param con A [`DBI::DBIConnection`] obtained from [`DBI::dbConnect()`].
+#'
+#' @return Invisibly returns `NULL`. The function is called for its side
+#'   effects.
+#' @export
+#'
+#' @importFrom DBI dbExecute
 create_power_database_schema <- function(con) {
   
   # Parameters table
@@ -60,6 +71,21 @@ create_power_database_schema <- function(con) {
 # ESTIMATION SIMULATIONS DATABASE
 # ============================================================================
 
+#' Create the Estimation Simulation Database Schema
+#'
+#' The estimation simulation database stores parameter settings, estimation
+#' configurations, and the per-replicate summaries produced by
+#' [run_and_store_estimation_simulations()]. The schema is created if it does
+#' not already exist. The function is safe to call repeatedly on the same
+#' database connection.
+#'
+#' @inheritParams create_power_database_schema
+#'
+#' @return Invisibly returns `NULL`. The function is called for its side
+#'   effects.
+#' @export
+#'
+#' @importFrom DBI dbExecute
 create_estimation_database_schema <- function(con) {
   
   # Parameters table
@@ -149,8 +175,31 @@ create_estimation_database_schema <- function(con) {
 # HELPER FUNCTIONS FOR DATABASE OPERATIONS
 # ============================================================================
 
-#' Get or Insert Parameter ID (Power Database)
-get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model, 
+#' Retrieve or Insert Power Simulation Parameters
+#'
+#' Ensures that a parameter configuration for the power simulations exists in
+#' the database and returns its identifier. If the configuration is not yet
+#' present it is inserted before the identifier is returned.
+#'
+#' @param con A [`DBI::DBIConnection`].
+#' @param n Integer sample size.
+#' @param p Integer number of predictors.
+#' @param lambda Numeric ridge penalty for the test statistics.
+#' @param test_type Character string identifying the test type
+#'   (e.g. `"AS_SW_plugin"`).
+#' @param GLM_model Character string naming the GLM family (e.g. `"logistic"`).
+#' @param model_specification Character string describing whether the model is
+#'   well specified or misspecified.
+#' @param n_beta Optional integer sample size used for the working coefficient
+#'   estimation. Use `NULL` for oracle coefficients.
+#' @param lambda_beta Optional numeric ridge penalty used when estimating the
+#'   working coefficients.
+#'
+#' @return An integer identifier for the parameter configuration.
+#' @export
+#'
+#' @importFrom DBI dbExecute dbGetQuery
+get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model,
                                          model_specification, n_beta = NULL, lambda_beta = NULL) {
   if (is.null(n_beta)) n_beta <- NA_integer_
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
@@ -184,8 +233,19 @@ get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model
 }
 
 
-#' Get or Insert Parameter ID (Estimation Database)
-get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model, 
+#' Retrieve or Insert Estimation Simulation Parameters
+#'
+#' Ensures that an estimation parameter configuration exists in the database
+#' and returns its identifier. Missing configurations are inserted prior to
+#' returning the identifier.
+#'
+#' @inheritParams get_or_insert_power_param_id
+#'
+#' @return An integer identifier for the parameter configuration.
+#' @export
+#'
+#' @importFrom DBI dbExecute dbGetQuery
+get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model,
                                                model_specification, n_beta = NULL, lambda_beta = NULL) {
   if (is.null(n_beta)) n_beta <- NA_integer_
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
@@ -219,7 +279,19 @@ get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model,
 }
 
 
-#' Get or Insert Estimation Settings ID
+#' Retrieve or Insert Estimation Settings
+#'
+#' Ensures that an estimation settings configuration exists in the database
+#' and returns its identifier. Missing configurations are inserted prior to
+#' returning the identifier.
+#'
+#' @param con A [`DBI::DBIConnection`].
+#' @param lambda_est Numeric ridge penalty used in the loss calculations.
+#'
+#' @return An integer identifier for the estimation settings configuration.
+#' @export
+#'
+#' @importFrom DBI dbExecute dbGetQuery
 get_or_insert_estimation_settings_id <- function(con, lambda_est) {
   # Check if estimation settings already exist
   query <- "SELECT id FROM estimation_settings WHERE lambda_est = ?;"
@@ -236,7 +308,24 @@ get_or_insert_estimation_settings_id <- function(con, lambda_est) {
 }
 
 
-#' Insert Power Results Batch
+#' Insert a Batch of Power Simulation Results
+#'
+#' Writes multiple rows of p-values for a given parameter identifier to the
+#' power simulation database.
+#'
+#' @param con A [`DBI::DBIConnection`].
+#' @param param_id Integer identifier returned by
+#'   [get_or_insert_power_param_id()].
+#' @param p_val_matrix A numeric matrix in which each row contains the
+#'   p-values for a single simulation replicate and each column corresponds to a
+#'   value of gamma.
+#' @param replicate_start Integer index of the first replicate in the provided
+#'   matrix. Subsequent rows are numbered sequentially.
+#'
+#' @return Invisibly returns `NULL`. Called for its side effects.
+#' @export
+#'
+#' @importFrom DBI dbSendStatement dbBind dbClearResult
 insert_power_results_batch <- function(con, param_id, p_val_matrix, replicate_start = 1) {
   if (!is.matrix(p_val_matrix)) {
     stop("Error: p_val_matrix must be a matrix.")
@@ -261,9 +350,29 @@ insert_power_results_batch <- function(con, param_id, p_val_matrix, replicate_st
 }
 
 
-#' Insert Estimation Results Batch
-insert_estimation_results_batch <- function(con, param_id, estimation_id, 
-                                           theta_hat_matrix, target_loss_matrix, 
+#' Insert a Batch of Estimation Simulation Results
+#'
+#' Persists the theta-hat estimates and associated loss summaries for a single
+#' parameter and estimation setting combination.
+#'
+#' @param con A [`DBI::DBIConnection`].
+#' @param param_id Integer identifier returned by
+#'   [get_or_insert_estimation_param_id()].
+#' @param estimation_id Integer identifier returned by
+#'   [get_or_insert_estimation_settings_id()].
+#' @param theta_hat_matrix Numeric matrix of theta-hat estimates, with rows for
+#'   replicates and columns for gamma values.
+#' @param target_loss_matrix Numeric matrix of target model losses.
+#' @param null_loss_matrix Numeric matrix of null model losses.
+#' @param replicate_start Integer index of the first replicate in the provided
+#'   matrices.
+#'
+#' @return Invisibly returns `NULL`. Called for its side effects.
+#' @export
+#'
+#' @importFrom DBI dbSendStatement dbBind dbClearResult
+insert_estimation_results_batch <- function(con, param_id, estimation_id,
+                                           theta_hat_matrix, target_loss_matrix,
                                            null_loss_matrix, replicate_start = 1) {
   if (!is.matrix(theta_hat_matrix) || !is.matrix(target_loss_matrix) || !is.matrix(null_loss_matrix)) {
     stop("Error: All input matrices must be matrices.")
@@ -303,7 +412,23 @@ insert_estimation_results_batch <- function(con, param_id, estimation_id,
 # INITIALIZATION FUNCTIONS
 # ============================================================================
 
-#' Initialize Power Database
+#' Initialize the Power Simulation Database
+#'
+#' Convenience helper that creates (or upgrades) the on-disk database used to
+#' store power simulation results.
+#'
+#' @param db_path Path to the SQLite database file.
+#'
+#' @return Invisibly returns `NULL`. Called for its side effects.
+#' @export
+#'
+#' @importFrom DBI dbConnect dbDisconnect
+#' @importFrom RSQLite SQLite
+#' @examples
+#' \dontrun{
+#' tmp <- tempfile(fileext = ".sqlite")
+#' initialize_power_database(tmp)
+#' }
 initialize_power_database <- function(db_path = "power_simulations.db") {
   con <- dbConnect(SQLite(), db_path)
   create_power_database_schema(con)
@@ -312,7 +437,23 @@ initialize_power_database <- function(db_path = "power_simulations.db") {
 }
 
 
-#' Initialize Estimation Database
+#' Initialize the Estimation Simulation Database
+#'
+#' Convenience helper that creates (or upgrades) the on-disk database used to
+#' store estimation simulation outputs.
+#'
+#' @inheritParams initialize_power_database
+#'
+#' @return Invisibly returns `NULL`. Called for its side effects.
+#' @export
+#'
+#' @importFrom DBI dbConnect dbDisconnect
+#' @importFrom RSQLite SQLite
+#' @examples
+#' \dontrun{
+#' tmp <- tempfile(fileext = ".sqlite")
+#' initialize_estimation_database(tmp)
+#' }
 initialize_estimation_database <- function(db_path = "estimation_simulations.db") {
   con <- dbConnect(SQLite(), db_path)
   create_estimation_database_schema(con)
