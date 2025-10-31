@@ -9,6 +9,31 @@
 library(DBI)
 library(RSQLite)
 
+# ------------------------------------------------------------------------------
+# Schema Migration Utilities
+# ------------------------------------------------------------------------------
+
+ensure_beta_source_column <- function(con, table_name) {
+  table_info <- dbGetQuery(con, sprintf("PRAGMA table_info(%s);", table_name))
+
+  if (!any(table_info$name == "beta_source")) {
+    dbExecute(con, sprintf(
+      "ALTER TABLE %s ADD COLUMN beta_source TEXT DEFAULT 'oracle';",
+      table_name
+    ))
+
+    dbExecute(con, sprintf(
+      "UPDATE %s SET beta_source = CASE WHEN n_beta IS NULL THEN 'oracle' ELSE 'estimated' END;",
+      table_name
+    ))
+
+    dbExecute(con, sprintf(
+      "UPDATE %s SET beta_source = 'oracle' WHERE beta_source IS NULL;",
+      table_name
+    ))
+  }
+}
+
 # ============================================================================
 # POWER SIMULATIONS DATABASE
 # ============================================================================
@@ -27,9 +52,12 @@ create_power_database_schema <- function(con) {
       model_specification TEXT NOT NULL,
       n_beta INTEGER,
       lambda_beta REAL,
-      UNIQUE(n, p, lambda, test_type, GLM_model, model_specification, n_beta, lambda_beta)
+      beta_source TEXT CHECK(beta_source IN ('oracle','estimated')) NOT NULL DEFAULT 'oracle',
+      UNIQUE(n, p, lambda, test_type, GLM_model, model_specification, n_beta, lambda_beta, beta_source)
     );
   ")
+
+  ensure_beta_source_column(con, "parameters")
   
   # Results table - stores p-values for each gamma
   dbExecute(con, "
@@ -73,9 +101,12 @@ create_estimation_database_schema <- function(con) {
       model_specification TEXT NOT NULL,
       n_beta INTEGER,
       lambda_beta REAL,
-      UNIQUE(n, p, lambda, GLM_model, model_specification, n_beta, lambda_beta)
+      beta_source TEXT CHECK(beta_source IN ('oracle','estimated')) NOT NULL DEFAULT 'oracle',
+      UNIQUE(n, p, lambda, GLM_model, model_specification, n_beta, lambda_beta, beta_source)
     );
   ")
+
+  ensure_beta_source_column(con, "parameters")
   
   # Estimation settings table
   dbExecute(con, "
@@ -150,35 +181,44 @@ create_estimation_database_schema <- function(con) {
 # ============================================================================
 
 #' Get or Insert Parameter ID (Power Database)
+#'
+#' @param beta_source Character string indicating whether betas are treated as
+#'   `"oracle"` (no estimation) or `"estimated"`.
 get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model,
-                                         model_specification, n_beta = NULL, lambda_beta = NULL) {
+                                         model_specification, n_beta = NULL, lambda_beta = NULL,
+                                         beta_source = NULL) {
+  if (is.null(beta_source)) {
+    beta_source <- if (is.null(n_beta) || (length(n_beta) == 1 && is.na(n_beta))) "oracle" else "estimated"
+  }
+
   if (is.null(n_beta)) n_beta <- NA_integer_
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
-  
+
   # Check if parameters already exist
-  query <- "SELECT id FROM parameters 
-            WHERE n = ? AND p = ? AND lambda = ? AND test_type = ? 
-            AND GLM_model = ? AND model_specification = ? 
-            AND (n_beta IS ? OR n_beta = ?) 
-            AND (lambda_beta IS ? OR lambda_beta = ?);"
-  
+  query <- "SELECT id FROM parameters
+            WHERE n = ? AND p = ? AND lambda = ? AND test_type = ?
+            AND GLM_model = ? AND model_specification = ?
+            AND (n_beta IS ? OR n_beta = ?)
+            AND (lambda_beta IS ? OR lambda_beta = ?)
+            AND beta_source = ?;"
+
   existing_id <- dbGetQuery(con, query, params = list(
-    n, p, lambda, test_type, GLM_model, model_specification, 
-    n_beta, n_beta, lambda_beta, lambda_beta
+    n, p, lambda, test_type, GLM_model, model_specification,
+    n_beta, n_beta, lambda_beta, lambda_beta, beta_source
   ))
-  
+
   if (nrow(existing_id) > 0) {
     return(existing_id$id[1])
   } else {
     # Insert new parameters
-    insert_query <- "INSERT INTO parameters 
-                     (n, p, lambda, test_type, GLM_model, model_specification, n_beta, lambda_beta)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
-    
+    insert_query <- "INSERT INTO parameters
+                     (n, p, lambda, test_type, GLM_model, model_specification, n_beta, lambda_beta, beta_source)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);"
+
     dbExecute(con, insert_query, params = list(
-      n, p, lambda, test_type, GLM_model, model_specification, n_beta, lambda_beta
+      n, p, lambda, test_type, GLM_model, model_specification, n_beta, lambda_beta, beta_source
     ))
-    
+
     return(dbGetQuery(con, "SELECT last_insert_rowid();")[1, 1])
   }
 }
@@ -203,35 +243,44 @@ get_max_power_replicate_id <- function(con, param_id) {
 
 
 #' Get or Insert Parameter ID (Estimation Database)
+#'
+#' @param beta_source Character string indicating whether betas are treated as
+#'   `"oracle"` (no estimation) or `"estimated"`.
 get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model,
-                                               model_specification, n_beta = NULL, lambda_beta = NULL) {
+                                               model_specification, n_beta = NULL, lambda_beta = NULL,
+                                               beta_source = NULL) {
+  if (is.null(beta_source)) {
+    beta_source <- if (is.null(n_beta) || (length(n_beta) == 1 && is.na(n_beta))) "oracle" else "estimated"
+  }
+
   if (is.null(n_beta)) n_beta <- NA_integer_
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
-  
+
   # Check if parameters already exist
-  query <- "SELECT id FROM parameters 
-            WHERE n = ? AND p = ? AND lambda = ? 
-            AND GLM_model = ? AND model_specification = ? 
-            AND (n_beta IS ? OR n_beta = ?) 
-            AND (lambda_beta IS ? OR lambda_beta = ?);"
-  
+  query <- "SELECT id FROM parameters
+            WHERE n = ? AND p = ? AND lambda = ?
+            AND GLM_model = ? AND model_specification = ?
+            AND (n_beta IS ? OR n_beta = ?)
+            AND (lambda_beta IS ? OR lambda_beta = ?)
+            AND beta_source = ?;"
+
   existing_id <- dbGetQuery(con, query, params = list(
-    n, p, lambda, GLM_model, model_specification, 
-    n_beta, n_beta, lambda_beta, lambda_beta
+    n, p, lambda, GLM_model, model_specification,
+    n_beta, n_beta, lambda_beta, lambda_beta, beta_source
   ))
-  
+
   if (nrow(existing_id) > 0) {
     return(existing_id$id[1])
   } else {
     # Insert new parameters
-    insert_query <- "INSERT INTO parameters 
-                     (n, p, lambda, GLM_model, model_specification, n_beta, lambda_beta)
-                     VALUES (?, ?, ?, ?, ?, ?, ?);"
-    
+    insert_query <- "INSERT INTO parameters
+                     (n, p, lambda, GLM_model, model_specification, n_beta, lambda_beta, beta_source)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?);"
+
     dbExecute(con, insert_query, params = list(
-      n, p, lambda, GLM_model, model_specification, n_beta, lambda_beta
+      n, p, lambda, GLM_model, model_specification, n_beta, lambda_beta, beta_source
     ))
-    
+
     return(dbGetQuery(con, "SELECT last_insert_rowid();")[1, 1])
   }
 }
@@ -342,6 +391,10 @@ insert_estimation_results_batch <- function(con, param_id, estimation_id,
 # ============================================================================
 
 #' Initialize Power Database
+#'
+#' @details The `parameters` table includes a `beta_source` column indicating
+#'   whether beta coefficients are treated as `"oracle"` (no estimation) or
+#'   `"estimated"` when results are stored.
 initialize_power_database <- function(db_path = "power_simulations.db") {
   con <- dbConnect(SQLite(), db_path)
   create_power_database_schema(con)
@@ -351,6 +404,10 @@ initialize_power_database <- function(db_path = "power_simulations.db") {
 
 
 #' Initialize Estimation Database
+#'
+#' @details The `parameters` table includes a `beta_source` column indicating
+#'   whether beta coefficients are treated as `"oracle"` (no estimation) or
+#'   `"estimated"` when results are stored.
 initialize_estimation_database <- function(db_path = "estimation_simulations.db") {
   con <- dbConnect(SQLite(), db_path)
   create_estimation_database_schema(con)

@@ -80,9 +80,13 @@ run_and_store_power_simulations <- function(
                           sim_count, total_sims, n, test_type, spec, 
                           ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
           
+          # Determine beta source for database storage
+          beta_source <- if (is.null(n_beta)) "oracle" else "estimated"
+
           # Get or insert parameter ID
           param_id <- get_or_insert_power_param_id(
-            con, n, p, lambda, test_type, model, spec, n_beta, lambda_beta
+            con, n, p, lambda, test_type, model, spec, n_beta, lambda_beta,
+            beta_source = beta_source
           )
 
           current_max_replicate <- get_max_power_replicate_id(con, param_id)
@@ -310,9 +314,13 @@ run_and_store_estimation_simulations <- function(
                         sim_count, total_sims, n, spec, 
                         ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
         
+        # Determine beta source for database storage
+        beta_source <- if (is.null(n_beta)) "oracle" else "estimated"
+
         # Get or insert parameter ID
         param_id <- get_or_insert_estimation_param_id(
-          con, n, p, lambda, model, spec, n_beta, lambda_beta
+          con, n, p, lambda, model, spec, n_beta, lambda_beta,
+          beta_source = beta_source
         )
 
         current_max_replicate <- get_max_estimation_replicate_id(
