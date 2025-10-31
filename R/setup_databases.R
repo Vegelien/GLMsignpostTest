@@ -156,11 +156,11 @@ get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
   
   # Check if parameters already exist
-  query <- "SELECT id FROM parameters 
-            WHERE n = ? AND p = ? AND lambda = ? AND test_type = ? 
-            AND GLM_model = ? AND model_specification = ? 
-            AND (n_beta IS ? OR n_beta = ?) 
-            AND (lambda_beta IS ? OR lambda_beta = ?);"
+  query <- "SELECT id FROM parameters
+            WHERE n = ? AND p = ? AND lambda = ? AND test_type = ?
+            AND GLM_model = ? AND model_specification = ?
+            AND ((? IS NULL AND n_beta IS NULL) OR n_beta = ?)
+            AND ((? IS NULL AND lambda_beta IS NULL) OR lambda_beta = ?);"
   
   existing_id <- dbGetQuery(con, query, params = list(
     n, p, lambda, test_type, GLM_model, model_specification, 
@@ -191,11 +191,11 @@ get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model,
   if (is.null(lambda_beta)) lambda_beta <- NA_real_
   
   # Check if parameters already exist
-  query <- "SELECT id FROM parameters 
-            WHERE n = ? AND p = ? AND lambda = ? 
-            AND GLM_model = ? AND model_specification = ? 
-            AND (n_beta IS ? OR n_beta = ?) 
-            AND (lambda_beta IS ? OR lambda_beta = ?);"
+  query <- "SELECT id FROM parameters
+            WHERE n = ? AND p = ? AND lambda = ?
+            AND GLM_model = ? AND model_specification = ?
+            AND ((? IS NULL AND n_beta IS NULL) OR n_beta = ?)
+            AND ((? IS NULL AND lambda_beta IS NULL) OR lambda_beta = ?);"
   
   existing_id <- dbGetQuery(con, query, params = list(
     n, p, lambda, GLM_model, model_specification, 
