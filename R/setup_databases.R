@@ -37,6 +37,26 @@ ensure_beta_source_column <- function(con, table_name) {
 # ============================================================================
 # POWER SIMULATIONS DATABASE
 # ============================================================================
+create_power_view <- function(con) {
+
+  dbExecute(con, "
+    CREATE VIEW IF NOT EXISTS Power AS
+    SELECT
+        p.*,
+        COUNT(r.id) AS num_results,
+        AVG(CASE WHEN r.p_value00 < 0.05 THEN 1.0 ELSE 0 END) AS power_gamma0,
+        AVG(CASE WHEN r.p_value01 < 0.05 THEN 1.0 ELSE 0 END) AS power_gamma0_1,
+        AVG(CASE WHEN r.p_value02 < 0.05 THEN 1.0 ELSE 0 END) AS power_gamma0_2,
+        AVG(CASE WHEN r.p_value03 < 0.05 THEN 1.0 ELSE 0 END) AS power_gamma0_3,
+        AVG(CASE WHEN r.p_value04 < 0.05 THEN 1.0 ELSE 0 END) AS power_gamma0_4,
+        AVG(CASE WHEN r.p_value05 < 0.05 THEN 1.0 ELSE 0 END) AS power_gamma0_5
+    FROM parameters p
+    JOIN results r ON p.id = r.param_id
+    GROUP BY p.id;")
+  
+  message("✓ Power view created successfully")
+}
+
 
 create_power_database_schema <- function(con) {
   
@@ -461,6 +481,18 @@ initialize_power_database <- function(db_path = "power_simulations.db") {
   message(paste("Power database initialized at:", db_path))
 }
 
+
+#' Initialize Power View
+#'
+#' @details The `parameters` table includes a `beta_source` column indicating
+#'   whether beta coefficients are treated as `"oracle"` (no estimation) or
+#'   `"estimated"` when results are stored.
+initialize_power_view <- function(db_path = "power_simulations.db") {
+  con <- dbConnect(SQLite(), db_path)
+  create_power_view(con)
+  dbDisconnect(con)
+  message(paste("Power view initialized at:", db_path))
+}
 
 #' Initialize Estimation Database
 #'
