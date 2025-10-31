@@ -169,7 +169,7 @@ generate_Y <- function(eta, model, n, sigma = 1) {
 #' @param lambda_beta Numeric, the regularization parameter for ridge regression.
 #' @return A numeric vector of estimated beta coefficients (scaled to unit norm).
 #' @export
-generate_beta_est <- function(true_beta, n_beta, X, model, lambda_beta) {
+generate_beta_est <- function(true_beta, n_beta, X, model, lambda_beta, scaled = TRUE) {
   # Generate response data
   eta <- calculate_eta(X, 0, true_beta, true_beta)  # Compute linear predictor
   Y <- generate_Y(eta, model, n_beta)  # Generate response variable
@@ -204,13 +204,19 @@ generate_beta_est <- function(true_beta, n_beta, X, model, lambda_beta) {
   beta_est <- as.vector(coef(fit))[-1]
   
   # Return scaled beta estimate
-  norm_beta <- sqrt(sum(beta_est^2))
-  if (norm_beta > 0) {
-    return(beta_est / norm_beta)
-  } else {
-    warning("Estimated beta has zero norm")
+  if(scaled){
+    norm_beta <- sqrt(sum(beta_est^2))
+    if (norm_beta > 0) {
+      return(beta_est / norm_beta)
+    } else {
+      warning("Estimated beta has zero norm")
+      return(beta_est)
+    }
+  }else {
     return(beta_est)
   }
+  
+
 }
 
 

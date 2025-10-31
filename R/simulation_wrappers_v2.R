@@ -9,9 +9,19 @@
 
 library(DBI)
 library(RSQLite)
-library(GLMsignpostTest)
+library(dplyr)
+library(porridge)
+# Source your files (adjust paths as needed)
+# source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/GLMsignpostTest/R/simulationFunctions.R")
+# source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/GLMsignpostTest/R/signpostTestFunctions.R")
+# source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/GLMsignpostTest/R/ridgePoisson.R")  # Contains ridge_efficient
+# source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/GLMsignpostTest/R/prediction_simulation.R")  # Contains ridge_efficient
+# source("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/setup_databases.R")
+# 
+# 
+# setwd("/Users/alexandra/Documents/Werk/Documents/Wessel - project 1/")
 
-source("setup_databases.R")
+
 
 # ============================================================================
 # POWER SIMULATIONS (using existing functions)
@@ -35,18 +45,18 @@ source("setup_databases.R")
 #' @param B_X Number of design matrices (for AS test only)
 #' @param gammas Gamma grid (default: 0, 0.1, ..., 0.5)
 run_and_store_power_simulations <- function(
-  db_path = "power_simulations.db",
-  n_grid = c(10, 20, 40, 60, 80, 100, 150),
-  p = 100,
-  lambda = Inf,
-  test_types = c("AS_SW_plugin", "LR"),
-  model = "logistic",
-  specifications = c("well_specified", "misspecified"),
-  n_beta_values = list(NULL, 300),
-  lambda_beta = 2,
-  B_power = 10,
-  B_X = 10,
-  gammas = seq(0, 0.5, by = 0.1)
+    db_path = "power_simulations.db",
+    n_grid = c(10, 20, 40, 60, 80, 100, 150),
+    p = 100,
+    lambda = Inf,
+    test_types = c("AS_SW_plugin", "LR"),
+    model = "logistic",
+    specifications = c("well_specified", "misspecified"),
+    n_beta_values = list(NULL, 300),
+    lambda_beta = 2,
+    B_power = 10,
+    B_X = 10,
+    gammas = seq(0, 0.5, by = 0.1)
 ) {
   
   con <- dbConnect(SQLite(), db_path)
@@ -67,8 +77,8 @@ run_and_store_power_simulations <- function(
           
           sim_count <- sim_count + 1
           message(sprintf("\n[%d/%d] Running: n=%d, test=%s, spec=%s, n_beta=%s",
-                         sim_count, total_sims, n, test_type, spec, 
-                         ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
+                          sim_count, total_sims, n, test_type, spec, 
+                          ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
           
           # Get or insert parameter ID
           param_id <- get_or_insert_power_param_id(
@@ -86,16 +96,16 @@ run_and_store_power_simulations <- function(
               p = p, 
               gammaH0 = 0,
               model = model, 
-              lambda = lambda * n,  # glmnet scale
+              lambda = lambda,  # glmnet scale
               B_X = B_X,
               B_power = B_power,
               n_beta = n_beta,
-              lambda_beta = lambda_beta * ifelse(is.null(n_beta), 1, n_beta),  # glmnet scale
+              lambda_beta = lambda_beta,  # glmnet scale
               estimate_beta = estimate_beta,
               use_theta_hat_in_variance = TRUE,
               fisher = FALSE,
               term1ONLY = TRUE,
-              lambda_est = lambda * n,  # Not used for power, but required parameter
+              lambda_est = lambda ,  # Not used for power, but required parameter
               misspecified = misspecified,
               scaled = TRUE
             )
@@ -104,12 +114,12 @@ run_and_store_power_simulations <- function(
               n = n,
               p = p,
               model = model,
-              lambda = lambda * n,  # glmnet scale
+              lambda = lambda ,  # glmnet scale
               B_power = B_power,
               n_beta = n_beta,
-              lambda_beta = lambda_beta * ifelse(is.null(n_beta), 1, n_beta),  # glmnet scale
+              lambda_beta = lambda_beta,  # glmnet scale
               estimate_beta = estimate_beta,
-              lambda_est = lambda * n,  # Not used for power, but required parameter
+              lambda_est = lambda ,  # Not used for power, but required parameter
               misspecified = misspecified,
               scaled = TRUE
             )
@@ -149,13 +159,13 @@ run_and_store_power_simulations <- function(
 #' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
 #' @return List with theta_hats, target_loss, null_loss matrices
 estimation_simulation <- function(n, p, lambda, model,
-                                 misspecified = FALSE,
-                                 n_beta = NULL, 
-                                 lambda_beta = 2,
-                                 lambda_est = 0.5,
-                                 B_power = 10,
-                                 gammas = seq(0, 1, by = 0.1),
-                                 scaled = TRUE) {
+                                  misspecified = FALSE,
+                                  n_beta = NULL, 
+                                  lambda_beta = 2,
+                                  lambda_est = 0.5,
+                                  B_power = 10,
+                                  gammas = seq(0, 1, by = 0.1),
+                                  scaled = TRUE) {
   
   G <- length(gammas)
   estimate_beta <- !is.null(n_beta)
@@ -192,7 +202,7 @@ estimation_simulation <- function(n, p, lambda, model,
       }
       X_a <- generate_X(n_beta, p)
       BETA_A_hat <- generate_beta_est(BETA_A, n_beta, X_a, model, 
-                                      lambda_beta * n_beta, scaled = scaled)
+                                      lambda_beta, scaled = scaled)
     } else {
       BETA_A_hat <- BETA_A
     }
@@ -209,10 +219,10 @@ estimation_simulation <- function(n, p, lambda, model,
       # Estimate theta_hat using WORKING betas
       if (is.infinite(lambda)) {
         theta_hat <- theta_inf_hat(Y, X, matrix(ncol = 0, nrow = n),
-                                  BETA_0_info, BETA_A_hat, model)
+                                   BETA_0_info, BETA_A_hat, model)
       } else {
         theta_hat <- theta_hat_lambda(Y, X, BETA_0_info, BETA_A_hat, 
-                                      lambda * n, model)
+                                      lambda , model)
       }
       
       # Calculate losses using TRUE betas for target
@@ -220,12 +230,12 @@ estimation_simulation <- function(n, p, lambda, model,
       
       loss_target <- squared_loss_beta(
         theta_hat, Y, X, BETA_0_info, BETA_A_hat,
-        lambda_est * n, true_beta, model
+        lambda_est, true_beta, model
       )
       
       loss_null <- squared_loss_beta(
         0, Y, X, BETA_0_info, BETA_A_hat,
-        lambda_est * n, true_beta, model
+        lambda_est, true_beta, model
       )
       
       # Store results
@@ -257,17 +267,17 @@ estimation_simulation <- function(n, p, lambda, model,
 #' @param B_power Number of replicates
 #' @param gammas Gamma grid (default: 0, 0.1, ..., 1.0)
 run_and_store_estimation_simulations <- function(
-  db_path = "estimation_simulations.db",
-  n_grid = c(10, 50, 150),
-  p = 100,
-  lambda = Inf,
-  model = "logistic",
-  specifications = c("well_specified", "misspecified"),
-  n_beta_values = list(NULL, 300),
-  lambda_beta = 2,
-  lambda_est = 0.5,
-  B_power = 10,
-  gammas = seq(0, 1, by = 0.1)
+    db_path = "estimation_simulations.db",
+    n_grid = c(10, 50, 150),
+    p = 100,
+    lambda = Inf,
+    model = "logistic",
+    specifications = c("well_specified", "misspecified"),
+    n_beta_values = list(NULL, 300),
+    lambda_beta = 2,
+    lambda_est = 0.5,
+    B_power = 10,
+    gammas = seq(0, 1, by = 0.1)
 ) {
   
   con <- dbConnect(SQLite(), db_path)
@@ -290,8 +300,8 @@ run_and_store_estimation_simulations <- function(
         
         sim_count <- sim_count + 1
         message(sprintf("\n[%d/%d] Running: n=%d, spec=%s, n_beta=%s",
-                       sim_count, total_sims, n, spec, 
-                       ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
+                        sim_count, total_sims, n, spec, 
+                        ifelse(is.null(n_beta), "oracle", as.character(n_beta))))
         
         # Get or insert parameter ID
         param_id <- get_or_insert_estimation_param_id(
