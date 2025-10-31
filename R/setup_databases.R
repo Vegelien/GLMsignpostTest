@@ -21,9 +21,18 @@
 #'
 #' @return Invisibly returns `NULL`. The function is called for its side
 #'   effects.
+#' @name database_schemas
+#' @rdname database_schemas
 #' @export
 #'
 #' @importFrom DBI dbExecute
+#' @examples
+#' \dontrun{
+#' con <- DBI::dbConnect(RSQLite::SQLite(), tempfile(fileext = ".sqlite"))
+#' create_power_database_schema(con)
+#' create_estimation_database_schema(con)
+#' DBI::dbDisconnect(con)
+#' }
 create_power_database_schema <- function(con) {
   
   # Parameters table
@@ -83,6 +92,7 @@ create_power_database_schema <- function(con) {
 #'
 #' @return Invisibly returns `NULL`. The function is called for its side
 #'   effects.
+#' @rdname database_schemas
 #' @export
 #'
 #' @importFrom DBI dbExecute
@@ -196,9 +206,22 @@ create_estimation_database_schema <- function(con) {
 #'   working coefficients.
 #'
 #' @return An integer identifier for the parameter configuration.
+#' @name database_parameter_helpers
+#' @rdname database_parameter_helpers
 #' @export
 #'
 #' @importFrom DBI dbExecute dbGetQuery
+#' @examples
+#' \dontrun{
+#' con <- DBI::dbConnect(RSQLite::SQLite(), tempfile(fileext = ".sqlite"))
+#' create_power_database_schema(con)
+#' power_id <- get_or_insert_power_param_id(
+#'   con, n = 10, p = 20, lambda = Inf, test_type = "AS_SW_plugin",
+#'   GLM_model = "logistic", model_specification = "well_specified"
+#' )
+#' settings_id <- get_or_insert_estimation_settings_id(con, lambda_est = 0.5)
+#' DBI::dbDisconnect(con)
+#' }
 get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model,
                                          model_specification, n_beta = NULL, lambda_beta = NULL) {
   if (is.null(n_beta)) n_beta <- NA_integer_
@@ -242,6 +265,7 @@ get_or_insert_power_param_id <- function(con, n, p, lambda, test_type, GLM_model
 #' @inheritParams get_or_insert_power_param_id
 #'
 #' @return An integer identifier for the parameter configuration.
+#' @rdname database_parameter_helpers
 #' @export
 #'
 #' @importFrom DBI dbExecute dbGetQuery
@@ -289,6 +313,7 @@ get_or_insert_estimation_param_id <- function(con, n, p, lambda, GLM_model,
 #' @param lambda_est Numeric ridge penalty used in the loss calculations.
 #'
 #' @return An integer identifier for the estimation settings configuration.
+#' @rdname database_parameter_helpers
 #' @export
 #'
 #' @importFrom DBI dbExecute dbGetQuery
@@ -323,9 +348,22 @@ get_or_insert_estimation_settings_id <- function(con, lambda_est) {
 #'   matrix. Subsequent rows are numbered sequentially.
 #'
 #' @return Invisibly returns `NULL`. Called for its side effects.
+#' @name database_result_helpers
+#' @rdname database_result_helpers
 #' @export
 #'
 #' @importFrom DBI dbSendStatement dbBind dbClearResult
+#' @examples
+#' \dontrun{
+#' con <- DBI::dbConnect(RSQLite::SQLite(), tempfile(fileext = ".sqlite"))
+#' create_power_database_schema(con)
+#' param_id <- get_or_insert_power_param_id(
+#'   con, n = 10, p = 20, lambda = Inf, test_type = "AS_SW_plugin",
+#'   GLM_model = "logistic", model_specification = "well_specified"
+#' )
+#' insert_power_results_batch(con, param_id, matrix(runif(6), ncol = 3))
+#' DBI::dbDisconnect(con)
+#' }
 insert_power_results_batch <- function(con, param_id, p_val_matrix, replicate_start = 1) {
   if (!is.matrix(p_val_matrix)) {
     stop("Error: p_val_matrix must be a matrix.")
@@ -368,6 +406,7 @@ insert_power_results_batch <- function(con, param_id, p_val_matrix, replicate_st
 #'   matrices.
 #'
 #' @return Invisibly returns `NULL`. Called for its side effects.
+#' @rdname database_result_helpers
 #' @export
 #'
 #' @importFrom DBI dbSendStatement dbBind dbClearResult
@@ -420,6 +459,8 @@ insert_estimation_results_batch <- function(con, param_id, estimation_id,
 #' @param db_path Path to the SQLite database file.
 #'
 #' @return Invisibly returns `NULL`. Called for its side effects.
+#' @name initialize_databases
+#' @rdname initialize_databases
 #' @export
 #'
 #' @importFrom DBI dbConnect dbDisconnect
@@ -428,6 +469,7 @@ insert_estimation_results_batch <- function(con, param_id, estimation_id,
 #' \dontrun{
 #' tmp <- tempfile(fileext = ".sqlite")
 #' initialize_power_database(tmp)
+#' initialize_estimation_database(tempfile(fileext = ".sqlite"))
 #' }
 initialize_power_database <- function(db_path = "power_simulations.db") {
   con <- dbConnect(SQLite(), db_path)
@@ -445,15 +487,11 @@ initialize_power_database <- function(db_path = "power_simulations.db") {
 #' @inheritParams initialize_power_database
 #'
 #' @return Invisibly returns `NULL`. Called for its side effects.
+#' @rdname initialize_databases
 #' @export
 #'
 #' @importFrom DBI dbConnect dbDisconnect
 #' @importFrom RSQLite SQLite
-#' @examples
-#' \dontrun{
-#' tmp <- tempfile(fileext = ".sqlite")
-#' initialize_estimation_database(tmp)
-#' }
 initialize_estimation_database <- function(db_path = "estimation_simulations.db") {
   con <- dbConnect(SQLite(), db_path)
   create_estimation_database_schema(con)
