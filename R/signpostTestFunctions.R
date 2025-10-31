@@ -38,6 +38,33 @@ create_progress_reporter <- function(total, name = "Progress") {
 
 # ---- Core Theta Calculation Functions ----
 
+
+# thetaInf <- function(theta, Y, X, U, lpTarget0, lpTargetD, model) {
+#   linPred <- lpTarget0 + lpTargetD * theta
+#   
+#   if (ncol(U) > 0) {
+#     # CLIP just for the ridge step to avoid exp()/weights overflow in IRLS
+#     linPred_clip <- pmax(pmin(linPred, 35), -35)
+#     
+#     adj <- ridge_efficient(
+#       Y = Y,
+#       X = matrix(linPred_clip, ncol = 1),
+#       U = U,
+#       lambda = 1e10,          # keep as-is for now (we can reduce after verifying)
+#       target = c(1),
+#       model = model
+#     )[1:ncol(U)]
+#     
+#     # if adj has any non-finite, skip the adjustment (rare with clip)
+#     if (!all(is.finite(adj))) adj[] <- 0
+#     
+#     linPred <- linPred + as.vector(U %*% adj)
+#   }
+#   
+#   # ... (rest identical)
+# }
+
+
 #' Helper function to theta_inf_hat, calculates RHS of estimating equation
 #'
 #' @param theta Numeric in [0,1], shrinkage parameter.
@@ -53,8 +80,23 @@ thetaInf <- function(theta, Y, X, U, lpTarget0, lpTargetD, model) {
   linPred <- lpTarget0 + lpTargetD * theta
   
   if (ncol(U) > 0) {
-    dHat <- ridge_efficient(Y = Y, X = matrix(linPred, ncol = 1), U = U, lambda = 10^10, target = c(1), model = model)[1:ncol(U)]
+    linPred_clip <- pmax(pmin(linPred, 35), -35)
+    dHat <- ridge_efficient(Y = Y, X = matrix(linPred_clip, ncol = 1), U = U, lambda = 10^10, target = c(1), model = model)[1:ncol(U)]
     linPred <- linPred + dHat %*% t(U)
+
+    
+    # fit_unpen <- ridge_efficient(
+    #   Y = Y,
+    #   X = matrix(linPred, ncol = 1),
+    #   U = U,
+    #   lambda = 10^10,
+    #   target = c(1),
+    #   model = model
+    # )
+    # 
+    # dHat <- extract_unpenalized_coefficients(fit_unpen, ncol(U))
+    # linPred <- linPred + tcrossprod(dHat, U)
+    # 
   }
   
   if (model == "linear") {
@@ -67,6 +109,58 @@ thetaInf <- function(theta, Y, X, U, lpTarget0, lpTargetD, model) {
   
   return(sum((Y - Yexp) * lpTargetD))
 }
+
+#' Extract unpenalized coefficients from a ridge solver result
+#'
+#' @param fit Result returned by `ridge_efficient()`.
+#' @param n_unpenalized Integer, number of unpenalized coefficients expected.
+#' @keywords internal
+extract_unpenalized_coefficients <- function(fit, n_unpenalized) {
+  if (n_unpenalized <= 0L) {
+    return(numeric(0))
+  }
+  
+  if (is.null(fit)) {
+    return(rep(0, n_unpenalized))
+  }
+  
+  coeffs <- NULL
+  
+  if (is.list(fit)) {
+    if (!is.null(fit$unpenalized)) {
+      coeffs <- fit$unpenalized
+    } else {
+      alpha <- if (!is.null(fit$alpha)) fit$alpha else numeric(0)
+      gamma <- if (!is.null(fit$gamma)) fit$gamma else numeric(0)
+      coeffs <- c(alpha, gamma)
+      
+      if (length(coeffs) == 0 && !is.null(fit$coef)) {
+        coeffs <- fit$coef
+      }
+      
+      if (length(coeffs) == 0) {
+        coeffs <- unlist(fit, use.names = FALSE)
+      }
+    }
+  } else {
+    coeffs <- as.numeric(fit)
+  }
+  
+  coeffs <- as.numeric(coeffs)
+  if (!length(coeffs)) {
+    coeffs <- numeric(0)
+  }
+  
+  if (length(coeffs) < n_unpenalized) {
+    coeffs <- c(coeffs, rep(0, n_unpenalized - length(coeffs)))
+  }
+  
+  coeffs <- coeffs[seq_len(n_unpenalized)]
+  coeffs[!is.finite(coeffs)] <- 0
+  
+  coeffs
+}
+
 
 #' Generalized theta_inf_hat with custom endpoints
 #'
@@ -110,6 +204,7 @@ theta_inf_hat <- function(Y, X, U, beta_0, beta_a, model,
                       lpTarget0 = lpTarget0, lpTargetD = lpTargetD, model = model)$root
   } else {
     # Choose endpoint with smaller absolute value
+    print("no root in interval")
     thetaI <- ifelse(abs(thetaIup) > abs(thetaIlow), theta_min, theta_max)
   }
   

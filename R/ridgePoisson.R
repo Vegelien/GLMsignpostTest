@@ -80,15 +80,7 @@ ridge_complete <- function(
   # ---- Build unpenalized design U (intercept + U_extra) on RAW scale ----
   if (!is.null(U_extra)) U_extra <- as.matrix(U_extra)
   if (!is.null(U_extra) && nrow(U_extra) != n) stop("U_extra has incompatible number of rows.")
-  if (intercept) {
-    U <- cbind(`(Intercept)` = rep(1.0, n), U_extra)
-  } else {
-    U <- U_extra
-  }
-  pU <- if (is.null(U)) 0L else ncol(U)
-  if(is.null(U)){
-    U =  matrix(ncol = 0, nrow = n)
-  }
+  
   # ---- Compute centering and scale for penalized X (local; for dropping & std) ----
   # For dropping, we compute post-centering scale with divisor "glmnet" (n) regardless of scale_convention.
   mu_drop <- colMeans(X)
@@ -100,6 +92,35 @@ ridge_complete <- function(
   rule    <- zero_var_policy$rule    %||% "abs_or_rel"
   med_s   <- stats::median(s_drop[is.finite(s_drop)], na.rm = TRUE)
   if (!is.finite(med_s) || med_s <= 0) med_s <- 1.0
+  
+  # ---- Check for zero-variance columns in U_extra (before building U) ----
+  if (!is.null(U_extra) && ncol(U_extra) > 0) {
+    # Compute column means and standard deviations for U_extra
+    mu_U <- colMeans(U_extra)
+    s_U <- sqrt(colMeans(sweep(U_extra, 2L, mu_U, FUN = "-")^2))
+    
+    # Apply near-zero policy to U_extra (using same policy as X)
+    med_s_U <- stats::median(s_U[is.finite(s_U)], na.rm = TRUE)
+    if (!is.finite(med_s_U) || med_s_U <= 0) med_s_U <- 1.0
+    
+    small_abs_U <- s_U < tol_abs
+    small_rel_U <- s_U < (tol_rel * med_s_U)
+    drop_mask_U <- switch(rule,
+                          abs_or_rel = (small_abs_U | small_rel_U),
+                          abs_and_rel = (small_abs_U & small_rel_U),
+                          abs_only = small_abs_U,
+                          rel_only = small_rel_U,
+                          stop("Unknown zero_var_policy$rule")
+    )
+    keep_idx_U <- which(!drop_mask_U)
+    
+    # Filter U_extra to keep only non-zero-variance columns
+    if (length(keep_idx_U) < ncol(U_extra)) {
+      warning(sprintf("Dropped %d zero-variance columns from U_extra", 
+                      ncol(U_extra) - length(keep_idx_U)))
+      U_extra <- U_extra[, keep_idx_U, drop = FALSE]
+    }
+  }
   
   small_abs <- s_drop < tol_abs
   small_rel <- s_drop < (tol_rel * med_s)
@@ -117,6 +138,17 @@ ridge_complete <- function(
   # We'll pass a 0-column matrix to the solver and handle fallbacks if needed.
   X_keep <- if (length(keep_idx)) X[, keep_idx, drop = FALSE] else X[, FALSE, drop = FALSE]
   p_keep <- ncol(X_keep)
+  
+  # Now build U after U_extra has been filtered
+  if (intercept) {
+    U <- cbind(`(Intercept)` = rep(1.0, n), U_extra)
+  } else {
+    U <- U_extra
+  }
+  pU <- if (is.null(U)) 0L else ncol(U)
+  if(is.null(U)){
+    U =  matrix(ncol = 0, nrow = n)
+  }
   
   
   # Prepare centering/scaling statistics for the penalized block (length p)

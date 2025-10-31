@@ -966,8 +966,8 @@ signpost_empirical_validity_split <- function(
   # sizes for 50/50 disjoint halves (use the smaller to match test sizes)
   min_size    <- min(n_A, n_B)
   test_size   <- floor(min_size / 2)
-  target_size_A <- n_A - test_size
-  target_size_B <- n_B - test_size
+  target_size_A <- min_size - test_size
+  target_size_B <- min_size - test_size
   
   if (verbose) {
     cat("Disjoint split sizes:\n")
@@ -984,7 +984,7 @@ signpost_empirical_validity_split <- function(
   # ---- worker ---------------------------------------------------------------
   worker_function <- function(split_id) {
     cat("LETSGOOO")
-    set.seed(split_id * 100000L)
+    #set.seed(split_id * 100000L)
     
     # 1) Disjoint random halves
     A_idx <- sample.int(n_A)
@@ -1019,14 +1019,14 @@ signpost_empirical_validity_split <- function(
     fit_A <- glmnet::glmnet(x = X_A_tg, y = Y_A_tg,
                             family = fam, alpha = 0,
                             lambda = lambda_beta,
-                            intercept = intercept, standardize = FALSE,
+                            intercept = intercept, standardize = TRUE,
                             penalty.factor = pf_A)
     co_A <- as.numeric(stats::coef(fit_A, s = lambda_beta))[-1L]  # drop intercept
     
     fit_B <- glmnet::glmnet(x = X_B_tg, y = Y_B_tg,
                             family = fam, alpha = 0,
                             lambda = lambda_beta,
-                            intercept = intercept, standardize = FALSE,
+                            intercept = intercept, standardize = TRUE,
                             penalty.factor = pf_B)
     co_B <- as.numeric(stats::coef(fit_B, s = lambda_beta))[-1L]  # drop intercept
     
@@ -1034,6 +1034,9 @@ signpost_empirical_validity_split <- function(
     beta_0_pen <- if (unpen_as_signpost) co_A else if (length(idx_pen)) co_A[idx_pen] else numeric(0)
     beta_a_pen <- if (unpen_as_signpost) co_B else if (length(idx_pen)) co_B[idx_pen] else numeric(0)
     
+    print(head(beta_0_pen))
+    print(head(beta_a_pen))
+    print(length(beta_0_pen))
     # Scale only the penalized block when requested
     if (isTRUE(scaled)) {
       n0 <- sqrt(sum(beta_0_pen^2)); if (is.finite(n0) && n0 > 0) beta_0_pen <- beta_0_pen / n0
@@ -1078,8 +1081,10 @@ signpost_empirical_validity_split <- function(
           b0_pen <- beta_0_pen
           ba_pen <- beta_a_pen
         }
-        
+        U = as.matrix(U)
         theta_hat <- tryCatch({
+          
+          
           
           if (is.infinite(lambda)) {
             theta_inf_hat(Y_mix, X_pen, U, b0_pen, ba_pen, model, theta_min = theta_min, theta_max = theta_max)
@@ -1091,7 +1096,48 @@ signpost_empirical_validity_split <- function(
             "[split %d, prop=%.2f, rep %d] θ failed: %s",
             split_id, prop_B, rep, conditionMessage(e)
           ))
-          NA_real_
+          
+          
+          lpTarget0 <- as.numeric(X_pen %*% b0_pen)
+          lpTargetD <- as.numeric(X_pen %*% ba_pen)
+          snap <- list(
+            # core inputs to theta_inf_hat / thetaInf
+            Y = Y_mix,
+            X_pen = X_pen,
+            U = U,
+            b0_pen = b0_pen,
+            ba_pen = ba_pen,
+            lpTarget0 = lpTarget0,
+            lpTargetD = lpTargetD,
+            model = model,
+            theta_min = theta_min,
+            theta_max = theta_max,
+            lambda = lambda,
+            # context (useful when comparing runs)
+            intercept = intercept,
+            unpen_as_signpost = unpen_as_signpost,
+            replacement_prop = prop_B,
+            split_id = split_id,
+            rep_id = rep,
+            dims = list(
+              X_pen = dim(X_pen),
+              U = dim(U),
+              Y = length(Y_mix),
+              p_pen = length(b0_pen)
+            ),
+            norms = list(
+              b0 = sqrt(sum(b0_pen^2)),
+              ba = sqrt(sum(ba_pen^2))
+            )
+          )
+          # saveRDS(snap, file = "debug_snapshot_file.rds")
+          # cat("[SNAPSHOT] Saved to", "debug_snapshot_file.rds", "\n")
+          # return(snap)
+          saveRDS(snap, file = "debug_snapshot_file.rds")
+          cat("[SNAPSHOT] Saved to", "debug_snapshot_file.rds", "\n")
+          # return(snap)
+          
+          return(NA_real_)
         })
         
         # theta_hat <- tryCatch({
@@ -1157,7 +1203,8 @@ signpost_empirical_validity_split <- function(
   
   parallel::clusterEvalQ(cl, { library(glmnet) })
   
-  res_list <- parallel::parLapply(cl, X = seq_len(n_bootstrap), fun = worker_function)
+  #res_list <- parallel::parLapply(cl, X = seq_len(n_bootstrap), fun = worker_function)
+  res_list <- lapply(X = seq_len(n_bootstrap), FUN = worker_function)
   results  <- do.call(rbind, res_list)
   
   # ---- write once (no early header) -----------------------------------------
@@ -1170,6 +1217,353 @@ signpost_empirical_validity_split <- function(
 }
 
 
+
+
+#' Plot Empirical Validity Results
+#'
+#' Creates comprehensive plots and summary statistics for empirical validity assessment.
+#' Can take either a data.frame from signpost_empirical_validity_final() or read from CSV file.
+#'
+#' @param results Data.frame with empirical validity results, or character path to CSV file
+#' @param title Character, main title for the plot
+#' @param save_plot Logical, whether to save the plot to file
+#' @param plot_file Character, filename for saved plot (if save_plot = TRUE)
+#' @param show_individual Logical, whether to show individual bootstrap results
+#' @param alpha_individual Numeric, transparency for individual points (if show_individual = TRUE)
+#' @param expected_theta_0 Numeric, expected theta value at prop_B = 0 (default: 0)
+#' @param expected_theta_1 Numeric, expected theta value at prop_B = 1 (default: 1)
+#'
+#' @return Invisible list with summary statistics and plot object
+#' @export
+plot_empirical_validity <- function(results, 
+                                    title = "Signpost Empirical Validity Assessment",
+                                    save_plot = FALSE,
+                                    plot_file = "empirical_validity_plot.png",
+                                    show_individual = TRUE,
+                                    alpha_individual = 0.3,
+                                    expected_theta_0 = 0,
+                                    expected_theta_1 = 1) {
+  
+  # Load required libraries
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("ggplot2 package is required for plotting")
+  }
+  library(ggplot2)
+  
+  # Handle input - either data.frame or file path
+  if (is.character(results)) {
+    cat("Reading results from file:", results, "\n")
+    if (!file.exists(results)) {
+      stop("File not found: ", results)
+    }
+    data <- read.csv(results)
+    data_source <- paste("File:", basename(results))
+  } else if (is.data.frame(results)) {
+    data <- results
+    data_source <- "Data.frame input"
+  } else {
+    stop("results must be either a data.frame or path to CSV file")
+  }
+  
+  # Validate required columns
+  required_cols <- c("prop_B", "theta_hat")
+  missing_cols <- setdiff(required_cols, names(data))
+  if (length(missing_cols) > 0) {
+    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+  }
+  
+  cat("=== EMPIRICAL VALIDITY RESULTS SUMMARY ===\n")
+  cat("Data source:", data_source, "\n")
+  cat("Total observations:", nrow(data), "\n")
+  
+  # Check for different result formats (final vs split methods)
+  has_target_bootstrap <- "target_bootstrap" %in% names(data)
+  has_split_id <- "split_id" %in% names(data)
+  has_stratum <- "stratum" %in% names(data)
+  
+  if (has_target_bootstrap) {
+    cat("Method: Bootstrap resampling (signpost_empirical_validity_final)\n")
+    cat("Unique target bootstraps:", length(unique(data$target_bootstrap)), "\n")
+    cat("Unique test bootstraps:", length(unique(data$test_bootstrap)), "\n")
+  } else if (has_split_id) {
+    cat("Method: Split-based")
+    if (has_stratum) {
+      cat(" with stratification\n")
+      unique_strata <- unique(data$stratum[!is.na(data$stratum) & data$stratum != ""])
+      cat("Unique strata:", length(unique_strata), "\n")
+      if (length(unique_strata) <= 10) {
+        cat("Strata:", paste(head(unique_strata, 10), collapse = ", "), "\n")
+      }
+    } else {
+      cat("\n")
+    }
+    cat("Unique splits:", length(unique(data$split_id)), "\n")
+    if ("rep_id" %in% names(data)) {
+      cat("Repetitions per split:", length(unique(data$rep_id)), "\n")
+    }
+  } else {
+    cat("Method: Unknown format\n")
+  }
+  
+  # Basic data quality checks
+  na_count <- sum(is.na(data$theta_hat))
+  na_percentage <- round(100 * na_count / nrow(data), 1)
+  cat("Missing theta_hat values:", na_count, "(", na_percentage, "%)\n")
+  
+  # Remove NA values for analysis
+  data_clean <- data[!is.na(data$theta_hat), ]
+  
+  if (nrow(data_clean) == 0) {
+    stop("No valid theta_hat values found")
+  }
+  
+  # Prop_B range and coverage
+  prop_B_range <- range(data_clean$prop_B)
+  unique_props <- sort(unique(data_clean$prop_B))
+  cat("Prop_B range:", prop_B_range[1], "to", prop_B_range[2], "\n")
+  cat("Unique prop_B values:", length(unique_props), "\n")
+  cat("Prop_B sequence:", paste(head(unique_props, 10), collapse = ", "), 
+      if(length(unique_props) > 10) "..." else "", "\n")
+  
+  # Theta_hat summary statistics
+  theta_range <- range(data_clean$theta_hat)
+  theta_mean <- mean(data_clean$theta_hat)
+  theta_median <- median(data_clean$theta_hat)
+  cat("\nTheta_hat summary:\n")
+  cat("Range:", round(theta_range[1], 4), "to", round(theta_range[2], 4), "\n")
+  cat("Mean:", round(theta_mean, 4), "\n")
+  cat("Median:", round(theta_median, 4), "\n")
+  
+  # Calculate summary by prop_B - FIXED VERSION
+  cat("Computing summary statistics by prop_B...\n")
+  summary_df <- data.frame()
+  
+  for (prop in sort(unique(data_clean$prop_B))) {
+    subset_data <- data_clean[data_clean$prop_B == prop, ]
+    theta_values <- subset_data$theta_hat[!is.na(subset_data$theta_hat)]  # Extra safety
+    
+    if (length(theta_values) > 0) {
+      summary_row <- data.frame(
+        prop_B = prop,
+        mean_theta = mean(theta_values),
+        median_theta = median(theta_values),
+        sd_theta = if(length(theta_values) > 1) sd(theta_values) else 0,
+        q25_theta = if(length(theta_values) > 1) quantile(theta_values, 0.25) else theta_values[1],
+        q75_theta = if(length(theta_values) > 1) quantile(theta_values, 0.75) else theta_values[1],
+        n_obs = length(theta_values)
+      )
+      summary_df <- rbind(summary_df, summary_row)
+    }
+  }
+  
+  if (nrow(summary_df) == 0) {
+    stop("No valid summary statistics could be computed")
+  }
+  
+  cat("\nSummary by prop_B:\n")
+  print(round(summary_df, 4))
+  
+  # Monotonicity analysis
+  cat("\n=== MONOTONICITY ANALYSIS ===\n")
+  if (nrow(summary_df) > 1) {
+    mean_diffs <- diff(summary_df$mean_theta)
+    non_monotonic <- mean_diffs < -1e-6  # Allow for small numerical errors
+    
+    if (any(non_monotonic)) {
+      cat("NON-MONOTONIC behavior detected!\n")
+      decreases <- which(non_monotonic)
+      for (i in decreases) {
+        cat("Decrease from prop_B =", summary_df$prop_B[i], 
+            "to", summary_df$prop_B[i + 1],
+            ": theta", round(summary_df$mean_theta[i], 4), 
+            "→", round(summary_df$mean_theta[i + 1], 4), "\n")
+      }
+    } else {
+      cat("MONOTONIC increase confirmed ✓\n")
+    }
+    
+    # Jump analysis
+    abs_diffs <- abs(mean_diffs)
+    max_jump_idx <- which.max(abs_diffs)
+    max_jump <- mean_diffs[max_jump_idx]
+    cat("Largest change: Δ =", round(max_jump, 4), 
+        "from prop_B =", summary_df$prop_B[max_jump_idx], 
+        "to", summary_df$prop_B[max_jump_idx + 1], "\n")
+  } else {
+    cat("Only one prop_B value - cannot assess monotonicity\n")
+    non_monotonic <- FALSE
+    max_jump <- 0
+  }
+  
+  # Check endpoints against expectations
+  cat("\n=== ENDPOINT ANALYSIS ===\n")
+  theta_at_0 <- summary_df$mean_theta[summary_df$prop_B == 0]
+  theta_at_1 <- summary_df$mean_theta[summary_df$prop_B == 1]
+  
+  deviation_0 <- deviation_1 <- NA
+  
+  if (length(theta_at_0) > 0) {
+    deviation_0 <- theta_at_0 - expected_theta_0
+    cat("At prop_B = 0: theta =", round(theta_at_0, 4), 
+        ", expected =", expected_theta_0, 
+        ", deviation =", round(deviation_0, 4), "\n")
+  }
+  
+  if (length(theta_at_1) > 0) {
+    deviation_1 <- theta_at_1 - expected_theta_1
+    cat("At prop_B = 1: theta =", round(theta_at_1, 4), 
+        ", expected =", expected_theta_1, 
+        ", deviation =", round(deviation_1, 4), "\n")
+  }
+  
+  # Variability analysis
+  cat("\n=== VARIABILITY ANALYSIS ===\n")
+  overall_sd <- sd(data_clean$theta_hat)
+  within_prop_sd <- mean(summary_df$sd_theta[summary_df$sd_theta > 0], na.rm = TRUE)
+  cat("Overall SD:", round(overall_sd, 4), "\n")
+  if (!is.na(within_prop_sd)) {
+    cat("Average within-prop_B SD:", round(within_prop_sd, 4), "\n")
+  }
+  cat("Between-prop_B variation:", round(sd(summary_df$mean_theta), 4), "\n")
+  
+  # Create the plot
+  cat("\n=== CREATING PLOT ===\n")
+  
+  # Base plot with summary line
+  p <- ggplot(summary_df, aes(x = prop_B, y = median_theta)) + #mean or median
+    geom_line(color = "blue", size = 1.2, alpha = 0.8) +
+    geom_point(color = "blue", size = 3, alpha = 0.8) +
+    labs(
+      title = title,
+      subtitle = paste("Data source:", data_source, 
+                       "| Total observations:", nrow(data_clean),
+                       "| Monotonic:", ifelse(any(non_monotonic), "No", "Yes")),
+      x = "Proportion of Dataset B (prop_B)",
+      y = "Theta-hat",
+      caption = paste("Blue line: mean theta | Error bars: ±1 SD |", 
+                      "Generated:", Sys.time())
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 11),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 10),
+      legend.position = "bottom"
+    )
+  
+  # Add error bars (only for points with sd > 0)
+  error_df <- summary_df[summary_df$sd_theta > 0, ]
+  if (nrow(error_df) > 0) {
+    p <- p + geom_errorbar(data = error_df,
+                           aes(ymin = q25_theta, 
+                               ymax = q75_theta),
+                           width = 0.02, alpha = 0.6, color = "blue")
+  }
+  
+  # Add individual points if requested
+  if (show_individual && nrow(data_clean) < 5000) {  # Avoid overplotting
+    p <- p + geom_point(data = data_clean, 
+                        aes(x = prop_B, y = theta_hat), 
+                        alpha = alpha_individual, 
+                        color = "gray30", 
+                        size = 0.8)
+  } else if (show_individual) {
+    cat("Too many points (", nrow(data_clean), ") - skipping individual points\n")
+  }
+  
+  # Add reference lines for expected values
+  y_range <- range(summary_df$median_theta, na.rm = TRUE)
+  if (expected_theta_0 >= y_range[1] && expected_theta_0 <= y_range[2]) {
+    p <- p + geom_hline(yintercept = expected_theta_0, 
+                        linetype = "dashed", color = "red", alpha = 0.7)
+  }
+  if (expected_theta_1 >= y_range[1] && expected_theta_1 <= y_range[2]) {
+    p <- p + geom_hline(yintercept = expected_theta_1, 
+                        linetype = "dashed", color = "red", alpha = 0.7)
+  }
+  
+  # Add trend annotation
+  if (nrow(summary_df) > 1) {
+    if (any(non_monotonic)) {
+      p <- p + annotate("text", x = max(summary_df$prop_B) * 0.7, 
+                        y = max(summary_df$median_theta) * 0.9,
+                        label = "⚠ Non-monotonic", color = "red", size = 4)
+    } else {
+      p <- p + annotate("text", x = max(summary_df$prop_B) * 0.7, 
+                        y = max(summary_df$median_theta) * 0.9,
+                        label = "✓ Monotonic", color = "darkgreen", size = 4)
+    }
+  }
+  
+  # Display the plot
+  print(p)
+  
+  # Save plot if requested
+  if (save_plot) {
+    ggsave(plot_file, plot = p, width = 10, height = 6, dpi = 300)
+    cat("Plot saved to:", plot_file, "\n")
+  }
+  
+  # Prepare return object
+  return_obj <- list(
+    summary_statistics = summary_df,
+    data_clean = data_clean,
+    monotonic = !any(non_monotonic),
+    max_jump = if(exists("max_jump")) max_jump else 0,
+    na_count = na_count,
+    plot = p,
+    endpoint_deviations = if(!is.na(deviation_0) && !is.na(deviation_1)) {
+      c(prop_B_0 = deviation_0, prop_B_1 = deviation_1)
+    } else NULL
+  )
+  
+  cat("\n=== ANALYSIS COMPLETE ===\n")
+  
+  # Overall assessment
+  if (nrow(summary_df) > 1) {
+    if (!any(non_monotonic) && abs(max_jump) < 0.2) {
+      cat("✅ GOOD: Monotonic increase with reasonable jumps\n")
+    } else if (!any(non_monotonic)) {
+      cat("⚠️  CAUTION: Monotonic but large jumps detected\n")
+    } else {
+      cat("❌ CONCERN: Non-monotonic behavior - investigate further\n")
+    }
+  } else {
+    cat("ℹ️  INFO: Only one prop_B value - limited assessment possible\n")
+  }
+  
+  return(invisible(return_obj))
+}
+
+#' Quick Plot Function (Simplified Interface)
+#'
+#' Simplified plotting function for quick visualization
+#'
+#' @param results Data.frame or path to CSV file
+#' @param title Character, plot title
+#'
+#' @return Plot object
+#' @export
+plot_empirical_validity_quick <- function(results, title = "Empirical Validity") {
+  plot_empirical_validity(results, title = title, show_individual = FALSE, save_plot = FALSE)
+}
+
+#' Summary Only Function
+#'
+#' Print summary statistics without creating plots
+#'
+#' @param results Data.frame or path to CSV file
+#'
+#' @return Summary statistics data.frame
+#' @export  
+summarize_empirical_validity <- function(results) {
+  # Suppress plot output and just return summary
+  invisible(capture.output({
+    temp_result <- plot_empirical_validity(results, show_individual = FALSE, save_plot = FALSE)
+  }))
+  return(temp_result$summary_statistics)
+}
 
 
 
