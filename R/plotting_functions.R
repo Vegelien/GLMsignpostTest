@@ -72,6 +72,14 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
         model_specification == "well_specified" & !is.na(n_beta) ~ "Well-specified\n(Estimated)",
         model_specification == "misspecified" & !is.na(n_beta) ~ "Misspecified\n(Estimated)",
         TRUE ~ NA_character_
+      ),
+      spec_label = factor(
+        spec_label,
+        levels = c(
+          "Well-specified\n(Oracle)",
+          "Well-specified\n(Estimated)",
+          "Misspecified\n(Estimated)"
+        )
       )
     ) %>%
     filter(!is.na(spec_label))  # Remove misspecified oracle (not used)
@@ -196,6 +204,14 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         model_specification == "well_specified" & !is.na(n_beta) ~ "Well-specified\n(Estimated)",
         model_specification == "misspecified" & !is.na(n_beta) ~ "Misspecified\n(Estimated)",
         TRUE ~ NA_character_
+      ),
+      spec_label = factor(
+        spec_label,
+        levels = c(
+          "Well-specified\n(Oracle)",
+          "Well-specified\n(Estimated)",
+          "Misspecified\n(Estimated)"
+        )
       )
     ) %>%
     filter(!is.na(spec_label))
@@ -203,7 +219,8 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
   p <- ggplot(theta_data, aes(x = factor(n), y = theta_hat, fill = factor(gamma))) +
     geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
-    scale_y_continuous(limits = c(0, 1)) +
+    scale_y_continuous(breaks = pretty_breaks()) +
+    coord_cartesian(ylim = c(0, 1)) +
     labs(
       title = expression(paste("Distribution of ", hat(theta), " Estimates")),
       x = "Sample Size (n)",
@@ -330,8 +347,15 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         model_specification == "well_specified" & is.na(n_beta) ~ "Well-specified\n(Oracle)",
         model_specification == "well_specified" & !is.na(n_beta) ~ "Well-specified\n(Estimated)",
         model_specification == "misspecified" & !is.na(n_beta) ~ "Misspecified\n(Estimated)",
-        model_specification == "misspecified" & is.na(n_beta) ~ "Misspecified\n(Oracle)",
         TRUE ~ NA_character_
+      ),
+      spec_label = factor(
+        spec_label,
+        levels = c(
+          "Well-specified\n(Oracle)",
+          "Well-specified\n(Estimated)",
+          "Misspecified\n(Estimated)"
+        )
       )
     ) %>%
     filter(!is.na(spec_label))
@@ -339,7 +363,8 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
   p <- ggplot(loss_data, aes(x = factor(n), y = relative_improvement, fill = factor(gamma))) +
     geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
-    scale_y_continuous(limits = y_limits) +
+    scale_y_continuous(breaks = pretty_breaks()) +
+    coord_cartesian(ylim = y_limits) +
     labs(
       title = "Relative Loss Improvement",
       x = "Sample Size (n)",
