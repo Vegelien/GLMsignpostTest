@@ -86,7 +86,11 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
 
   power_data <- power_data %>%
     mutate(
-      test_type = recode(test_type, AS_SW_plugin = "Asymptotic")
+      test_type = recode(
+        test_type,
+        AS_SW_plugin = "Asymptotic",
+        .default = test_type
+      )
     )
   
   # Reshape to long format
