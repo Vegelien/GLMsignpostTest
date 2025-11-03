@@ -341,7 +341,7 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
 plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db",
                                            model_filter = "logistic",
                                            lambda_filter = Inf,
-                                           y_limits = c(-0.5, 0.5)) {
+                                           y_limits = c(-1, 1)) {
   
   loss_data <- load_loss_data(db_path, model_filter, lambda_filter)
   
