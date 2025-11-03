@@ -61,9 +61,9 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
   power_data <- dbGetQuery(con, "SELECT * FROM Power")
   
   # Filter by model
-  power_data <- power_data %>% 
+  power_data <- power_data %>%
     filter(GLM_model == model_filter)
-  
+
   # Create specification label - only 3 categories
   power_data <- power_data %>%
     mutate(
@@ -75,6 +75,11 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
       )
     ) %>%
     filter(!is.na(spec_label))  # Remove misspecified oracle (not used)
+
+  power_data <- power_data %>%
+    mutate(
+      test_type = recode(test_type, AS_SW_plugin = "Asymptotic")
+    )
   
   # Reshape to long format
   power_long <- power_data %>%
@@ -194,9 +199,9 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
     filter(!is.na(spec_label))
   
   p <- ggplot(theta_data, aes(x = factor(n), y = theta_hat, fill = factor(gamma))) +
-    geom_boxplot(outlier.size = 0.5) +
+    geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
-    scale_y_continuous(limits = c(-0.5, 1.5)) +
+    scale_y_continuous(limits = c(0, 1)) +
     labs(
       title = expression(paste("Distribution of ", hat(theta), " Estimates")),
       x = "Sample Size (n)",
@@ -289,7 +294,7 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
     ) %>%
     mutate(
       loss_diff = null_loss - target_loss,
-      relative_improvement = 100 * loss_diff / null_loss
+      relative_improvement = loss_diff / null_loss
     )
   
   return(merged)
@@ -325,12 +330,12 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
     filter(!is.na(spec_label))
   
   p <- ggplot(loss_data, aes(x = factor(n), y = relative_improvement, fill = factor(gamma))) +
-    geom_boxplot(outlier.size = 0.5) +
+    geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
     labs(
       title = "Relative Loss Improvement",
       x = "Sample Size (n)",
-      y = "Relative Improvement (%)",
+      y = "Relative Improvement",
       fill = expression(gamma)
     ) +
     theme_minimal() +
