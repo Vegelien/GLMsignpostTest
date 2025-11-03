@@ -311,7 +311,8 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
         "lambda_est",
         "replicate_id",
         "gamma"
-      )
+      ),
+      na_matches = "na"
     ) %>%
     mutate(
       loss_diff = null_loss - target_loss,
