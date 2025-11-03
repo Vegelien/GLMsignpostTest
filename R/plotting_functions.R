@@ -110,9 +110,11 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
       color = expression(gamma)
     ) +
     theme_minimal() +
+    guides(color = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")) +
     theme(
       text = element_text(size = 11),
       legend.position = "bottom",
+      legend.box = "horizontal",
       strip.text = element_text(size = 10)
     )
   
@@ -209,10 +211,12 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       fill = expression(gamma)
     ) +
     theme_minimal() +
+    guides(fill = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")) +
     theme(
       text = element_text(size = 11),
       strip.text = element_text(size = 10),
-      legend.position = "bottom"
+      legend.position = "bottom",
+      legend.box = "horizontal"
     )
   
   return(p)
@@ -309,10 +313,13 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
 #' @param db_path Path to estimation database
 #' @param model_filter Filter by GLM_model
 #' @param lambda_filter Filter by lambda
+#' @param y_limits Numeric vector of length 2 giving y-axis limits for the
+#'   relative improvement plot
 #' @return ggplot object
 plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db",
                                            model_filter = "logistic",
-                                           lambda_filter = Inf) {
+                                           lambda_filter = Inf,
+                                           y_limits = c(-0.5, 0.5)) {
   
   loss_data <- load_loss_data(db_path, model_filter, lambda_filter)
   
@@ -332,6 +339,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
   p <- ggplot(loss_data, aes(x = factor(n), y = relative_improvement, fill = factor(gamma))) +
     geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
+    scale_y_continuous(limits = y_limits) +
     labs(
       title = "Relative Loss Improvement",
       x = "Sample Size (n)",
@@ -339,10 +347,12 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
       fill = expression(gamma)
     ) +
     theme_minimal() +
+    guides(fill = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")) +
     theme(
       text = element_text(size = 11),
       strip.text = element_text(size = 10),
-      legend.position = "bottom"
+      legend.position = "bottom",
+      legend.box = "horizontal"
     )
   
   return(p)
