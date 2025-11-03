@@ -259,7 +259,7 @@ estimation_simulation <- function(n, p, lambda, model,
       )
       
       loss_null <- squared_loss_beta(
-        0, Y, X, BETA_0_info, BETA_A_hat,
+        0, Y, X, (0*BETA_0_info), BETA_A_hat,
         lambda_est, true_beta, model
       )
       
