@@ -266,17 +266,27 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
     mutate(gamma = as.numeric(sub("target_loss", "", gamma)) / 10)
   
   null_long <- df %>%
-    select(replicate_id, all_of(null_cols)) %>%
+    select(n, model_specification, n_beta, lambda_est, replicate_id, all_of(null_cols)) %>%
     pivot_longer(
       cols = all_of(null_cols),
       names_to = "gamma",
       values_to = "null_loss"
     ) %>%
     mutate(gamma = as.numeric(sub("null_loss", "", gamma)) / 10)
-  
+
   # Merge and calculate relative improvement
   merged <- target_long %>%
-    left_join(null_long, by = c("replicate_id", "gamma")) %>%
+    left_join(
+      null_long,
+      by = c(
+        "n",
+        "model_specification",
+        "n_beta",
+        "lambda_est",
+        "replicate_id",
+        "gamma"
+      )
+    ) %>%
     mutate(
       loss_diff = null_loss - target_loss,
       relative_improvement = 100 * loss_diff / null_loss
