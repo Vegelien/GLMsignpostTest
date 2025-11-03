@@ -61,9 +61,9 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
   power_data <- dbGetQuery(con, "SELECT * FROM Power")
   
   # Filter by model
-  power_data <- power_data %>% 
+  power_data <- power_data %>%
     filter(GLM_model == model_filter)
-  
+
   # Create specification label - only 3 categories
   power_data <- power_data %>%
     mutate(
@@ -72,9 +72,22 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
         model_specification == "well_specified" & !is.na(n_beta) ~ "Well-specified\n(Estimated)",
         model_specification == "misspecified" & !is.na(n_beta) ~ "Misspecified\n(Estimated)",
         TRUE ~ NA_character_
+      ),
+      spec_label = factor(
+        spec_label,
+        levels = c(
+          "Well-specified\n(Oracle)",
+          "Well-specified\n(Estimated)",
+          "Misspecified\n(Estimated)"
+        )
       )
     ) %>%
     filter(!is.na(spec_label))  # Remove misspecified oracle (not used)
+
+  power_data <- power_data %>%
+    mutate(
+      test_type = recode(test_type, AS_SW_plugin = "Asymptotic")
+    )
   
   # Reshape to long format
   power_long <- power_data %>%
@@ -105,9 +118,11 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
       color = expression(gamma)
     ) +
     theme_minimal() +
+    guides(color = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")) +
     theme(
       text = element_text(size = 11),
       legend.position = "bottom",
+      legend.box = "horizontal",
       strip.text = element_text(size = 10)
     )
   
@@ -189,14 +204,23 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         model_specification == "well_specified" & !is.na(n_beta) ~ "Well-specified\n(Estimated)",
         model_specification == "misspecified" & !is.na(n_beta) ~ "Misspecified\n(Estimated)",
         TRUE ~ NA_character_
+      ),
+      spec_label = factor(
+        spec_label,
+        levels = c(
+          "Well-specified\n(Oracle)",
+          "Well-specified\n(Estimated)",
+          "Misspecified\n(Estimated)"
+        )
       )
     ) %>%
     filter(!is.na(spec_label))
   
   p <- ggplot(theta_data, aes(x = factor(n), y = theta_hat, fill = factor(gamma))) +
-    geom_boxplot(outlier.size = 0.5) +
+    geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
-    scale_y_continuous(limits = c(-0.5, 1.5)) +
+    scale_y_continuous(breaks = pretty_breaks()) +
+    coord_cartesian(ylim = c(0, 1)) +
     labs(
       title = expression(paste("Distribution of ", hat(theta), " Estimates")),
       x = "Sample Size (n)",
@@ -204,10 +228,12 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       fill = expression(gamma)
     ) +
     theme_minimal() +
+    guides(fill = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")) +
     theme(
       text = element_text(size = 11),
       strip.text = element_text(size = 10),
-      legend.position = "bottom"
+      legend.position = "bottom",
+      legend.box = "horizontal"
     )
   
   return(p)
@@ -266,20 +292,30 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
     mutate(gamma = as.numeric(sub("target_loss", "", gamma)) / 10)
   
   null_long <- df %>%
-    select(replicate_id, all_of(null_cols)) %>%
+    select(n, model_specification, n_beta, lambda_est, replicate_id, all_of(null_cols)) %>%
     pivot_longer(
       cols = all_of(null_cols),
       names_to = "gamma",
       values_to = "null_loss"
     ) %>%
     mutate(gamma = as.numeric(sub("null_loss", "", gamma)) / 10)
-  
+
   # Merge and calculate relative improvement
   merged <- target_long %>%
-    left_join(null_long, by = c("replicate_id", "gamma")) %>%
+    left_join(
+      null_long,
+      by = c(
+        "n",
+        "model_specification",
+        "n_beta",
+        "lambda_est",
+        "replicate_id",
+        "gamma"
+      )
+    ) %>%
     mutate(
       loss_diff = null_loss - target_loss,
-      relative_improvement = 100 * loss_diff / null_loss
+      relative_improvement = loss_diff / null_loss
     )
   
   return(merged)
@@ -294,10 +330,13 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
 #' @param db_path Path to estimation database
 #' @param model_filter Filter by GLM_model
 #' @param lambda_filter Filter by lambda
+#' @param y_limits Numeric vector of length 2 giving y-axis limits for the
+#'   relative improvement plot
 #' @return ggplot object
 plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db",
                                            model_filter = "logistic",
-                                           lambda_filter = Inf) {
+                                           lambda_filter = Inf,
+                                           y_limits = c(-0.5, 0.5)) {
   
   loss_data <- load_loss_data(db_path, model_filter, lambda_filter)
   
@@ -308,26 +347,37 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         model_specification == "well_specified" & is.na(n_beta) ~ "Well-specified\n(Oracle)",
         model_specification == "well_specified" & !is.na(n_beta) ~ "Well-specified\n(Estimated)",
         model_specification == "misspecified" & !is.na(n_beta) ~ "Misspecified\n(Estimated)",
-        model_specification == "misspecified" & is.na(n_beta) ~ "Misspecified\n(Oracle)",
         TRUE ~ NA_character_
+      ),
+      spec_label = factor(
+        spec_label,
+        levels = c(
+          "Well-specified\n(Oracle)",
+          "Well-specified\n(Estimated)",
+          "Misspecified\n(Estimated)"
+        )
       )
     ) %>%
     filter(!is.na(spec_label))
   
   p <- ggplot(loss_data, aes(x = factor(n), y = relative_improvement, fill = factor(gamma))) +
-    geom_boxplot(outlier.size = 0.5) +
+    geom_boxplot(outlier.shape = NA) +
     facet_grid(. ~ spec_label) +
+    scale_y_continuous(breaks = pretty_breaks()) +
+    coord_cartesian(ylim = y_limits) +
     labs(
       title = "Relative Loss Improvement",
       x = "Sample Size (n)",
-      y = "Relative Improvement (%)",
+      y = "Relative Improvement",
       fill = expression(gamma)
     ) +
     theme_minimal() +
+    guides(fill = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")) +
     theme(
       text = element_text(size = 11),
       strip.text = element_text(size = 10),
-      legend.position = "bottom"
+      legend.position = "bottom",
+      legend.box = "horizontal"
     )
   
   return(p)
