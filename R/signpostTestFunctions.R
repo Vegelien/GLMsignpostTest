@@ -211,6 +211,128 @@ theta_inf_hat <- function(Y, X, U, beta_0, beta_a, model,
   return(thetaI)
 }
 
+#' Direct θ̂∞ when U ≠ ∅ via re-parameterization (robust intercept handling)
+#'
+#' Estimates theta for the λ = ∞ case by fixing Xβ0 at coefficient 1
+#' (via a huge ridge penalty with target=1) and reading off θ as the
+#' coefficient on X(βa−β0) included in the unpenalized block.
+#'
+#' Robustness features:
+#' - Drops constant (≈zero-variance) columns from U to avoid backend dropping.
+#' - If a constant column (intercept proxy) is removed, the solver's intercept
+#'   is enabled so we still fit exactly one intercept.
+#' - Optionally bumps lambda once if coef(base) deviates noticeably from 1.
+#'
+#' @param Y Numeric vector (length n)
+#' @param X Numeric matrix (n × p) of penalized covariates
+#' @param U Numeric matrix (n × q) of unpenalized covariates (q can be 0)
+#' @param beta_0 Numeric length-p shrinkage target
+#' @param beta_a Numeric length-p alternative target
+#' @param model "linear", "logistic", or "poisson"
+#' @param theta_min,theta_max numeric bounds used for optional clipping
+#' @param lambda_fix large ridge penalty to nail coef(base) ≈ 1
+#' @param intercept logical; if TRUE, solver adds an intercept (may be flipped on
+#'                  internally when U contains/loses a constant column)
+#' @param standardize logical; FALSE means target=1 is on raw scale
+#' @param check_boundaries logical; clip to [theta_min, theta_max]
+#' @param tol_var tiny variance guard for identifiability of diff
+#' @param const_tol tolerance for "constant column" detection in U
+#' @param bump_lambda_tol threshold for |coef(base) - 1| to trigger one bump
+#' @param bump_factor how much to multiply lambda_fix by when bumping
+#' @param ...
+#' @return numeric scalar θ̂∞
+#' @export
+theta_inf_hat_direct <- function(
+    Y, X, U, beta_0, beta_a,
+    model = c("linear","logistic","poisson"),
+    theta_min = 0, theta_max = 1,
+    lambda_fix = 1e10,
+    intercept = TRUE,
+    standardize = FALSE,
+    check_boundaries = TRUE,
+    tol_var = 1e-10,
+    const_tol = 1e-12,
+    bump_lambda_tol = 1e-6,
+    bump_factor = 100,
+    ...
+) {
+  model <- match.arg(model)
+  validate_signpost_inputs(Y, X, beta_0, beta_a, model)
+  
+  n <- length(Y)
+  if (is.null(U)) U <- matrix(nrow = n, ncol = 0)
+  U <- as.matrix(U)
+  
+  # Fallback to root-based when U is empty.
+  if (ncol(U) == 0) {
+    return(theta_inf_hat(Y, X, U, beta_0, beta_a, model,
+                         theta_min = theta_min, theta_max = theta_max,
+                         do_rotation = FALSE))
+  }
+  
+  # base = X beta0 ; diff = X (beta_a - beta0)
+  base <- drop(X %*% beta_0)
+  diff <- drop(X %*% (beta_a - beta_0))
+  
+  # Identifiability guard: if diff has ~0 variance, choose boundary matching the smaller score
+  if (stats::sd(diff) < tol_var) {
+    if (!check_boundaries) return(theta_min)
+    lpTarget0 <- base
+    lpTargetD <- diff
+    g_low <- thetaInf(theta_min, Y, X, U, lpTarget0, lpTargetD, model)
+    g_up  <- thetaInf(theta_max, Y, X, U, lpTarget0, lpTargetD, model)
+    return(if (abs(g_up) > abs(g_low)) theta_min else theta_max)
+  }
+  
+  # === Intercept & constant-column canonicalization ===
+  # Drop constant columns from U (prevents backend "Dropped zero-variance" surprises)
+  if (ncol(U) > 0) {
+    sds <- apply(U, 2L, function(col) stats::sd(col))
+    const_idx <- which(!is.finite(sds) | sds < const_tol)
+    if (length(const_idx)) {
+      # If we removed a constant column (very likely an intercept proxy) and caller asked
+      # for no intercept, we still enable solver intercept to keep exactly one intercept.
+      if (!intercept) intercept <- TRUE
+      U <- U[, setdiff(seq_len(ncol(U)), const_idx), drop = FALSE]
+    }
+  }
+  
+  # One-shot fit: penalized block is base (target=1, huge lambda),
+  # unpenalized block is [U, diff]; θ is the last gamma.
+  do_fit <- function(lam) {
+    ridge_complete(
+      Y = Y,
+      X = matrix(base, ncol = 1),
+      lambda = lam,
+      target = 1,
+      model = if (model == "linear") "gaussian" else model,
+      intercept = intercept,
+      U_extra = cbind(U, diff),
+      standardize = standardize,
+      ...
+    )
+  }
+  
+  fit <- do_fit(lambda_fix)
+  
+  # If coef(base) deviates meaningfully from 1, bump lambda once.
+  if (!is.null(fit$beta) && length(fit$beta) == 1L && is.finite(fit$beta[1L])) {
+    if (abs(fit$beta[1L] - 1) > bump_lambda_tol) {
+      fit <- do_fit(lambda_fix * bump_factor)
+    }
+  }
+  
+  theta_hat <- utils::tail(fit$gamma, 1L)
+  
+  if (check_boundaries) {
+    if (theta_hat < theta_min) theta_hat <- theta_min
+    if (theta_hat > theta_max) theta_hat <- theta_max
+  }
+  theta_hat
+}
+
+
+
 #' Calculates theta_hat for given lambda < Inf with one-time random rotation and optimization
 #'
 #' @param Y Numeric, response vector.
