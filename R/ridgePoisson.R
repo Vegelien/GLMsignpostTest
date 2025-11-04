@@ -13,6 +13,15 @@
 #' @param target optional numeric vector of length p (target for \eqn{\beta}); if NULL, untargeted ridge.
 #' @param model character, one of c("logistic","gaussian","poisson").
 #' @param intercept logical; if TRUE, include an unpenalized intercept internally (recommended).
+#' @param intercept_policy character; strategy for handling zero-variance penalized columns.
+#'   One of:
+#'   - "auto" (default): drop zero-variance columns and, if `intercept = FALSE`, flip the
+#'     intercept on when any are found.
+#'   - "keep_one": when `intercept = FALSE`, retain exactly one zero-variance column (preferring
+#'     the one with the largest absolute mean) instead of adding an intercept. Drops all when
+#'     `intercept = TRUE`.
+#'   - "drop_all": drop every zero-variance penalized column without modifying the intercept
+#'     setting; emits a warning if this removes all such columns while `intercept = FALSE`.
 #' @param U_extra optional (n x q) matrix of extra unpenalized covariates (RAW scale; not centered/scaled).
 #' @param standardize logical; if TRUE, center & scale penalized columns locally (see `center`, `scale`).
 #' @param center logical; if TRUE, subtract column means of X (penalized part only).
@@ -48,6 +57,7 @@ ridge_complete <- function(
     Y, X, lambda, target = NULL,
     model = c("logistic","gaussian","poisson"),
     intercept = TRUE,
+    intercept_policy = c("auto","keep_one","drop_all"),
     U_extra = NULL,
     standardize = TRUE,
     center = standardize,
@@ -61,7 +71,11 @@ ridge_complete <- function(
   model <- match.arg(model)
   scale_convention <- match.arg(scale_convention)
   lambda_scale <- match.arg(lambda_scale)
+  intercept_policy <- match.arg(intercept_policy)
   intercept   <- isTRUE(intercept)
+  intercept_requested <- intercept
+  intercept_auto_flipped <- FALSE
+  kept_constant_idx <- integer(0)
   standardize <- isTRUE(standardize)
   center      <- isTRUE(center)
   scale       <- isTRUE(scale)
@@ -131,9 +145,34 @@ ridge_complete <- function(
                       rel_only = small_rel,
                       stop("Unknown zero_var_policy$rule")
   )
+  zero_var_idx <- which(drop_mask)
+
+  if (length(zero_var_idx) > 0L) {
+    if (identical(intercept_policy, "auto")) {
+      if (!intercept) {
+        intercept <- TRUE
+        intercept_auto_flipped <- TRUE
+      }
+    } else if (identical(intercept_policy, "keep_one")) {
+      if (!intercept) {
+        ord <- zero_var_idx[order(-abs(mu_drop[zero_var_idx]))]
+        keep_const <- ord[1L]
+        drop_mask[keep_const] <- FALSE
+        kept_constant_idx <- as.integer(keep_const)
+      }
+    } else if (identical(intercept_policy, "drop_all")) {
+      if (!intercept) {
+        warning(sprintf(
+          "Dropping %d zero-variance penalized columns while intercept = FALSE.",
+          length(zero_var_idx)
+        ))
+      }
+    }
+  }
+
   keep_idx <- which(!drop_mask)
   drop_idx <- which(drop_mask)
-  
+
   # Edge case: if nothing kept, we still want an intercept-only (and U_extra) fit.
   # We'll pass a 0-column matrix to the solver and handle fallbacks if needed.
   X_keep <- if (length(keep_idx)) X[, keep_idx, drop = FALSE] else X[, FALSE, drop = FALSE]
@@ -156,6 +195,9 @@ ridge_complete <- function(
   if (p_keep > 0) {
     if (center) {
       mu[keep_idx] <- colMeans(X_keep)
+      if (length(kept_constant_idx)) {
+        mu[kept_constant_idx] <- 0
+      }
     } else {
       mu[keep_idx] <- 0
     }
@@ -170,6 +212,9 @@ ridge_complete <- function(
       }
       # Protect against zeros after policy (shouldn't happen if drop policy used s_drop)
       s[keep_idx][s[keep_idx] == 0] <- 1
+      if (length(kept_constant_idx)) {
+        s[kept_constant_idx] <- 1
+      }
     } else {
       s[keep_idx] <- 1
     }
@@ -374,6 +419,10 @@ ridge_complete <- function(
       center = center,
       scale = scale,
       scale_convention = scale_convention,
+      intercept_requested = intercept_requested,
+      intercept_policy = intercept_policy,
+      intercept_auto_flipped = intercept_auto_flipped,
+      kept_constant = kept_constant_idx,
       zero_var_policy = list(tol_abs = tol_abs, tol_rel = tol_rel, rule = rule),
       solver_fun = deparse(substitute(solver_fun))
     )
