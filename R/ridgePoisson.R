@@ -57,7 +57,6 @@ ridge_complete <- function(
     Y, X, lambda, target = NULL,
     model = c("logistic","gaussian","poisson"),
     intercept = TRUE,
-    intercept_policy = c("auto","keep_one","drop_all"),
     U_extra = NULL,
     standardize = TRUE,
     center = standardize,
@@ -66,6 +65,7 @@ ridge_complete <- function(
     zero_var_policy = list(tol_abs = 1e-8, tol_rel = 1e-6, rule = "abs_or_rel"),
     lambda_scale = "glmnet", #c("glmnet","n_times"),
     solver_fun = ridgeGLM,
+    intercept_policy = c("auto","keep_one","drop_all"),
     ...
 ) {
   model <- match.arg(model)
