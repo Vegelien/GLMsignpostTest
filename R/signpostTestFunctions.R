@@ -36,6 +36,104 @@ create_progress_reporter <- function(total, name = "Progress") {
   }
 }
 
+#' Resolve GLM family utilities for variance calculations
+#'
+#' Returns link-inverse and variance functions for supported models.
+#'
+#' @param model Character string identifying the model ("logistic" or "poisson").
+#' @keywords internal
+resolve_glm_family <- function(model) {
+  switch(
+    model,
+    logistic = list(
+      linkinv = function(eta) 1 / (1 + exp(-eta)),
+      variance = function(mu) mu * (1 - mu)
+    ),
+    linear = list(
+      linkinv = function(eta) eta,
+      variance = function(mu) rep(1, length(mu))
+    ),
+    poisson = list(
+      linkinv = function(eta) exp(eta),
+      variance = function(mu) mu
+    ),
+    stop(sprintf("Unsupported model '%s'", model))
+  )
+}
+
+#' Compute GLM mean/variance given penalized and unpenalized blocks
+#'
+#' @param X Numeric matrix for penalized coefficients.
+#' @param beta Numeric vector of coefficients for X.
+#' @param model Character string ("logistic" or "poisson").
+#' @param U Optional numeric matrix for unpenalized covariates.
+#' @param delta Optional numeric vector of coefficients for U.
+#' @param offset Optional numeric vector to add to the linear predictor.
+#' @param mu Optional pre-computed mean vector.
+#' @param variance Optional pre-computed variance vector.
+#' @keywords internal
+compute_eta_mu_variance <- function(X, beta, model, U = NULL, delta = NULL,
+                                    offset = NULL, mu = NULL, variance = NULL) {
+  family_utils <- resolve_glm_family(model)
+  
+  if (!is.null(mu)) {
+    if (is.null(variance)) {
+      variance <- family_utils$variance(mu)
+    }
+    return(list(eta = NULL, mu = mu, variance = variance))
+  }
+  
+  if (is.null(beta)) {
+    stop("'beta' must be provided when 'mu' is NULL")
+  }
+  
+  eta <- drop(X %*% beta)
+  if (!is.null(offset)) {
+    eta <- eta + offset
+  }
+  if (!is.null(U)) {
+    if (is.null(delta)) {
+      stop("'delta' must be supplied when U is provided and mean is not pre-computed")
+    }
+    eta <- eta + drop(U %*% delta)
+  }
+  
+  mu <- family_utils$linkinv(eta)
+  variance <- family_utils$variance(mu)
+  
+  list(eta = eta, mu = mu, variance = variance)
+}
+
+#' Refit unpenalized coefficients for a fixed theta
+#'
+#' @param Y Response vector.
+#' @param U Matrix of unpenalized covariates.
+#' @param offset Linear predictor offset (typically X %*% beta(theta)).
+#' @param model Model family ("logistic" or "poisson").
+#' @keywords internal
+estimate_unpenalized_delta <- function(Y, U, offset, model) {
+  if (is.null(U) || ncol(U) == 0) {
+    return(numeric(0))
+  }
+  
+  family <- switch(
+    model,
+    logistic = stats::binomial(),
+    linear = stats::gaussian(),
+    poisson = stats::poisson(),
+    stop(sprintf("Unsupported model '%s'", model))
+  )
+  
+  fit <- try(stats::glm.fit(x = U, y = Y, family = family, offset = offset), silent = TRUE)
+  if (inherits(fit, "try-error") || is.null(fit$coefficients)) {
+    return(rep(0, ncol(U)))
+  }
+  
+  delta_hat <- as.numeric(fit$coefficients)
+  delta_hat[!is.finite(delta_hat)] <- 0
+  delta_hat
+}
+
 # ---- Core Theta Calculation Functions ----
 
 
@@ -579,25 +677,58 @@ pval2power = function(pval, alpha = 0.05){
 #' @param lambda_beta Numeric scalar, ridge penalty for beta estimation
 #' @param variance_type Character, either "sandwich" or "fisher"
 #' @param include_estimation_uncertainty Logical, whether to include uncertainty from beta estimation
-#'
+#' @param model Character string indicating the GLM family ("logistic" or "poisson")
+#' @param U1 Optional numeric matrix of unpenalized covariates used in beta estimation
+#' @param U2 Optional numeric matrix of unpenalized covariates for the test data
+#' @param delta Optional numeric vector of unpenalized coefficients for the test data
+#' @param delta_est Optional numeric vector of unpenalized coefficients for the estimation data
+#' @param offset1 Optional numeric vector offset for the estimation data linear predictor
+#' @param offset2 Optional numeric vector offset for the test data linear predictor
+#' @param mu2 Optional numeric vector of pre-computed means for the test data
+#' @param variance2 Optional numeric vector of pre-computed variances for the test data
 #' @return Numeric scalar, the variance estimate
 #' @export
 calc_asymptotic_variance <- function(beta_0, beta_a, theta2, y1 = NULL, y2, 
                                      X1 = NULL, X2, lambda_beta = NULL, 
                                      variance_type = c("sandwich", "fisher"),
-                                     include_estimation_uncertainty = TRUE) {
+                                     include_estimation_uncertainty = TRUE, 
+                                     model = c("logistic", "poisson"),
+                                     U1 = NULL, U2 = NULL,
+                                     delta = NULL, delta_est = NULL,
+                                     offset1 = NULL, offset2 = NULL,
+                                     mu2 = NULL, variance2 = NULL) {
   
   variance_type <- match.arg(variance_type)
-  sigmoid <- function(x) 1 / (1 + exp(-x))
+  #sigmoid <- function(x) 1 / (1 + exp(-x))
+  model <- match.arg(model)
   
   n <- nrow(X2)
   p <- length(beta_0)
-  delta <- beta_a - beta_0
+  # delta <- beta_a - beta_0
+  # 
+  # # Calculate components for test data (always needed)
+  # eta2 <- X2 %*% (beta_0 + theta2 * delta)
+  # p2 <- sigmoid(eta2)
+  # R22 <- mean(p2 * (1 - p2) * (X2 %*% delta)^2)
   
-  # Calculate components for test data (always needed)
-  eta2 <- X2 %*% (beta_0 + theta2 * delta)
-  p2 <- sigmoid(eta2)
-  R22 <- mean(p2 * (1 - p2) * (X2 %*% delta)^2)
+  delta_pen <- beta_a - beta_0
+  g2 <- as.vector(X2 %*% delta_pen)
+  
+  beta_theta <- beta_0 + theta2 * delta_pen
+  test_moments <- compute_eta_mu_variance(
+    X = X2,
+    beta = beta_theta,
+    model = model,
+    U = U2,
+    delta = delta,
+    offset = offset2,
+    mu = mu2,
+    variance = variance2
+  )
+  mu2 <- test_moments$mu
+  variance2 <- test_moments$variance
+  
+  R22 <- mean(variance2 * g2^2)
   
   if (variance_type == "fisher") {
     # Fisher information approach
@@ -605,30 +736,53 @@ calc_asymptotic_variance <- function(beta_0, beta_a, theta2, y1 = NULL, y2,
   }
   
   # Sandwich estimator approach
-  psi2 <- (y2 - p2) * as.vector(X2 %*% delta)
+  # psi2 <- (y2 - p2) * as.vector(X2 %*% delta)
+  psi2 <- (y2 - mu2) * g2
+  
   S22 <- mean(psi2^2)
   term1 <- S22 / (R22^2 * n)
   
   if (!include_estimation_uncertainty || is.null(X1) || is.null(y1)) {
     return(term1)
   }
+  #--------- usually until here -------
+  
   
   # Include uncertainty from beta estimation
   n_beta <- nrow(X1)
   
   # Components from estimation step
-  p1 <- sigmoid(X1 %*% beta_a)
-  W1 <- diag(as.vector(p1 * (1 - p1)))
-  R11 <- -crossprod(X1, W1 %*% X1) / n_beta - lambda_beta * diag(p)
+  # p1 <- sigmoid(X1 %*% beta_a)
+  # W1 <- diag(as.vector(p1 * (1 - p1)))
+  # R11 <- -crossprod(X1, W1 %*% X1) / n_beta - lambda_beta * diag(p)
+  # 
+  # # Cross terms
+  # R12 <- t(X2) %*% (y2 - p2) - theta2 * t(X2) %*% diag(c(p2 * (1 - p2))) %*% (X2 %*% delta)
+  # 
+  # # S11 calculation
+  # psi1 <- t(X1) %*% (y1 - p1) - lambda_beta * beta_a
   
-  # Cross terms
-  R12 <- t(X2) %*% (y2 - p2) - theta2 * t(X2) %*% diag(c(p2 * (1 - p2))) %*% (X2 %*% delta)
+  est_moments <- compute_eta_mu_variance(
+    X = X1,
+    beta = beta_a,
+    model = model,
+    U = U1,
+    delta = delta_est,
+    offset = offset1
+  )
+  mu1 <- est_moments$mu
+  variance1 <- est_moments$variance
   
-  # S11 calculation
-  psi1 <- t(X1) %*% (y1 - p1) - lambda_beta * beta_a
+  X1_weighted <- X1 * as.vector(variance1)
+  R11 <- -crossprod(X1, X1_weighted) / n_beta - lambda_beta * diag(p)
+  
+  R12 <- crossprod(X2, (y2 - mu2) - theta2 * variance2 * g2)
+  
+  psi1 <- crossprod(X1, y1 - mu1) - lambda_beta * beta_a
+  
   S11 <- matrix(0, ncol = p, nrow = p)
   for (i in 1:n_beta) {
-    psi1_i <- (y1[i] - p1[i]) * X1[i, ]
+    psi1_i <- (y1[i] - mu1[i]) * X1[i, ]
     S11 <- S11 + tcrossprod(psi1_i)
   }
   S11 <- S11 / n_beta
@@ -642,25 +796,42 @@ calc_asymptotic_variance <- function(beta_0, beta_a, theta2, y1 = NULL, y2,
 }
 
 # Wrapper for backward compatibility
-calc_V22 <- function(beta_0, beta_a, theta2, y1, y2, X1, X2, lambda_beta, term1ONLY = FALSE) {
+calc_V22 <- function(beta_0, beta_a, theta2, y1, y2, X1, X2, lambda_beta,
+                     term1ONLY = FALSE,
+                     model = c("logistic", "poisson"),
+                     U1 = NULL, U2 = NULL,
+                     delta = NULL, delta_est = NULL,
+                     offset1 = NULL, offset2 = NULL,
+                     mu2 = NULL, variance2 = NULL) {
   calc_asymptotic_variance(
     beta_0 = beta_0, beta_a = beta_a, theta2 = theta2,
     y1 = y1, y2 = y2, X1 = X1, X2 = X2,
     lambda_beta = lambda_beta,
     variance_type = "sandwich",
-    include_estimation_uncertainty = !term1ONLY
+    include_estimation_uncertainty = !term1ONLY, 
+    model = model,
+    U1 = U1, U2 = U2,
+    delta = delta, delta_est = delta_est,
+    offset1 = offset1, offset2 = offset2,
+    mu2 = mu2, variance2 = variance2
   )
 }
 
-AS_stdef <- function(beta_0, beta_a, theta2, y2, X2, fisher = FALSE) {
+AS_stdef <- function(beta_0, beta_a, theta2, y2, X2, fisher = FALSE,
+                     model = c("logistic", "poisson"),
+                     U2 = NULL, delta = NULL,
+                     offset2 = NULL, mu2 = NULL, variance2 = NULL) {
+  model <- match.arg(model)
   sqrt(calc_asymptotic_variance(
     beta_0 = beta_0, beta_a = beta_a, theta2 = theta2,
     y2 = y2, X2 = X2,
-    variance_type = if(fisher) "fisher" else "sandwich",
-    include_estimation_uncertainty = FALSE
+    variance_type = if (fisher) "fisher" else "sandwich",
+    include_estimation_uncertainty = FALSE,
+    model = model,
+    U2 = U2, delta = delta,
+    offset2 = offset2, mu2 = mu2, variance2 = variance2
   ))
 }
-
 # ---- Main Signpost Test Functions ----
 
 #' Signpost Test for Real Data with resampling (Updated)
@@ -775,6 +946,7 @@ Signpost_test_resample <- function(Y, X, gammaH0 = 0, model = "logistic", lambda
 #'
 #' @param Y Numeric vector of response variables (length n)
 #' @param X Numeric matrix of predictors (n x p)
+#' @param U Numeric matrix of predictors (n x q) that will not be penalized (default: empty)
 #' @param gammaH0 Numeric scalar. Null hypothesis value for gamma parameter (default: 0)
 #' @param model Character string. Model type, either "logistic" or "poisson" (default: "logistic")
 #' @param lambda Numeric scalar. Regularization parameter (glmnet scale)
@@ -792,7 +964,7 @@ Signpost_test_resample <- function(Y, X, gammaH0 = 0, model = "logistic", lambda
 #'
 #' @return A list containing p_value, theta_hat, std_error, test_statistic
 #' @export
-signpost_test_AS <- function(Y, X, gammaH0 = 0, model = "logistic", lambda,
+signpost_test_AS <- function(Y, X, U = matrix(ncol = 0, nrow = n), gammaH0 = 0, model = "logistic", lambda,
                              beta_0, beta_a, 
                              n_beta = NULL, lambda_beta = NULL, Y_a = NULL, X_a = NULL,
                              estimate_beta = FALSE,
@@ -812,9 +984,9 @@ signpost_test_AS <- function(Y, X, gammaH0 = 0, model = "logistic", lambda,
   if (estimate_beta) {
     # Use ridge_efficient for beta estimation
     if (model %in% c("logistic", "linear")) {
-      beta_a_hat <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta, model = model)
+      beta_a_hat <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta,U = U, model = model)
     } else if (model == "poisson") {
-      result <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta, model = model)
+      result <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta, U = U, model = model)
       beta_a_hat <- result$penalized
     }
     
@@ -827,9 +999,9 @@ signpost_test_AS <- function(Y, X, gammaH0 = 0, model = "logistic", lambda,
   
   # Estimate theta_hat
   if (is.infinite(lambda)) {
-    theta_hat <- theta_inf_hat(Y, X, matrix(ncol = 0, nrow = n), beta_0, beta_a_hat, model)
+    theta_hat <- theta_inf_hat(Y, X, U, beta_0, beta_a_hat, model)
   } else {
-    theta_hat <- theta_hat_lambda(Y, X, beta_0, beta_a_hat, lambda, model)
+    theta_hat <- theta_hat_lambda(Y, X, U, beta_0, beta_a_hat, lambda, model)
   }
   
   # Calculate standard error
