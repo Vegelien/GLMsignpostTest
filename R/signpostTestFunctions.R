@@ -688,19 +688,23 @@ pval2power = function(pval, alpha = 0.05){
 #' @param variance2 Optional numeric vector of pre-computed variances for the test data
 #' @return Numeric scalar, the variance estimate
 #' @export
-calc_asymptotic_variance <- function(beta_0, beta_a, theta2, y1 = NULL, y2, 
-                                     X1 = NULL, X2, lambda_beta = NULL, 
+calc_asymptotic_variance <- function(beta_0, beta_a, theta2, y1 = NULL, y2,
+                                     X1 = NULL, X2, lambda_beta = NULL,
                                      variance_type = c("sandwich", "fisher"),
-                                     include_estimation_uncertainty = TRUE, 
+                                     include_estimation_uncertainty = TRUE,
                                      model = c("logistic", "poisson"),
                                      U1 = NULL, U2 = NULL,
                                      delta = NULL, delta_est = NULL,
                                      offset1 = NULL, offset2 = NULL,
                                      mu2 = NULL, variance2 = NULL) {
-  
+
   variance_type <- match.arg(variance_type)
   #sigmoid <- function(x) 1 / (1 + exp(-x))
   model <- match.arg(model)
+
+  if (is.null(lambda_beta)) {
+    lambda_beta <- 0
+  }
   
   n <- nrow(X2)
   p <- length(beta_0)
