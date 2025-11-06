@@ -14,7 +14,16 @@ calc_asymptotic_variance(
   X2,
   lambda_beta = NULL,
   variance_type = c("sandwich", "fisher"),
-  include_estimation_uncertainty = TRUE
+  include_estimation_uncertainty = TRUE,
+  model = c("logistic", "poisson"),
+  U1 = NULL,
+  U2 = NULL,
+  delta = NULL,
+  delta_est = NULL,
+  offset1 = NULL,
+  offset2 = NULL,
+  mu2 = NULL,
+  variance2 = NULL
 )
 }
 \arguments{
@@ -37,6 +46,24 @@ calc_asymptotic_variance(
 \item{variance_type}{Character, either "sandwich" or "fisher"}
 
 \item{include_estimation_uncertainty}{Logical, whether to include uncertainty from beta estimation}
+
+\item{model}{Character string indicating the GLM family ("logistic" or "poisson")}
+
+\item{U1}{Optional numeric matrix of unpenalized covariates used in beta estimation}
+
+\item{U2}{Optional numeric matrix of unpenalized covariates for the test data}
+
+\item{delta}{Optional numeric vector of unpenalized coefficients for the test data}
+
+\item{delta_est}{Optional numeric vector of unpenalized coefficients for the estimation data}
+
+\item{offset1}{Optional numeric vector offset for the estimation data linear predictor}
+
+\item{offset2}{Optional numeric vector offset for the test data linear predictor}
+
+\item{mu2}{Optional numeric vector of pre-computed means for the test data}
+
+\item{variance2}{Optional numeric vector of pre-computed variances for the test data}
 }
 \value{
 Numeric scalar, the variance estimate
