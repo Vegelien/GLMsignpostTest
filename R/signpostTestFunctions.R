@@ -343,6 +343,7 @@ theta_inf_hat <- function(Y, X, U, beta_0, beta_a, model,
 theta_inf_hat_direct <- function(
     Y, X, U, beta_0, beta_a,
     model = c("linear","logistic","poisson"),
+    method = c("glmoffset", "ridge"),
     theta_min = 0, theta_max = 1,
     lambda_fix = 1e10,
     intercept = TRUE,
@@ -355,6 +356,7 @@ theta_inf_hat_direct <- function(
     ...
 ) {
   model <- match.arg(model)
+  method <- match.arg(method)
   validate_signpost_inputs(Y, X, beta_0, beta_a, model)
   
   n <- length(Y)
@@ -395,32 +397,82 @@ theta_inf_hat_direct <- function(
     }
   }
   
-  # One-shot fit: penalized block is base (target=1, huge lambda),
-  # unpenalized block is [U, diff]; θ is the last gamma.
-  do_fit <- function(lam) {
-    ridge_complete(
-      Y = Y,
-      X = matrix(base, ncol = 1),
-      lambda = lam,
-      target = 1,
-      model = if (model == "linear") "gaussian" else model,
-      intercept = intercept,
-      U_extra = cbind(U, diff),
-      standardize = standardize,
+  if (method == "glmoffset") {
+    if (standardize) {
+      stop("standardize = TRUE is not supported for method = 'glmoffset'")
+    }
+
+    family <- switch(
+      model,
+      linear = stats::gaussian(),
+      logistic = stats::binomial(),
+      poisson = stats::poisson(),
+      stop("Unsupported model: ", model)
+    )
+
+    df <- data.frame(Y = Y)
+    if (ncol(U) > 0) {
+      U_df <- as.data.frame(U)
+      if (is.null(colnames(U_df))) {
+        colnames(U_df) <- paste0("U", seq_len(ncol(U_df)))
+      }
+      df <- cbind(df, U_df)
+      u_names <- colnames(U_df)
+    } else {
+      u_names <- character(0)
+    }
+    df$diff <- diff
+    df$base <- base
+
+    rhs_terms <- c(u_names, "diff")
+    if (length(rhs_terms) == 0) {
+      formula_str <- if (intercept) "Y ~ 1" else "Y ~ 0"
+    } else {
+      rhs <- paste(rhs_terms, collapse = " + ")
+      formula_str <- if (intercept) paste("Y ~", rhs) else paste("Y ~ 0 +", rhs)
+    }
+
+    fit <- stats::glm(
+      stats::as.formula(formula_str),
+      family = family,
+      data = df,
+      offset = df$base,
       ...
     )
-  }
-  
-  fit <- do_fit(lambda_fix)
-  
-  # If coef(base) deviates meaningfully from 1, bump lambda once.
-  if (!is.null(fit$beta) && length(fit$beta) == 1L && is.finite(fit$beta[1L])) {
-    if (abs(fit$beta[1L] - 1) > bump_lambda_tol) {
-      fit <- do_fit(lambda_fix * bump_factor)
+
+    coef_diff <- stats::coef(fit)["diff"]
+    if (is.na(coef_diff)) {
+      stop("Failed to estimate coefficient for 'diff' in glm fit")
     }
+    theta_hat <- unname(coef_diff)
+  } else {
+    # One-shot fit: penalized block is base (target=1, huge lambda),
+    # unpenalized block is [U, diff]; θ is the last gamma.
+    do_fit <- function(lam) {
+      ridge_complete(
+        Y = Y,
+        X = matrix(base, ncol = 1),
+        lambda = lam,
+        target = 1,
+        model = if (model == "linear") "gaussian" else model,
+        intercept = intercept,
+        U_extra = cbind(U, diff),
+        standardize = standardize,
+        ...
+      )
+    }
+
+    fit <- do_fit(lambda_fix)
+
+    # If coef(base) deviates meaningfully from 1, bump lambda once.
+    if (!is.null(fit$beta) && length(fit$beta) == 1L && is.finite(fit$beta[1L])) {
+      if (abs(fit$beta[1L] - 1) > bump_lambda_tol) {
+        fit <- do_fit(lambda_fix * bump_factor)
+      }
+    }
+
+    theta_hat <- utils::tail(fit$gamma, 1L)
   }
-  
-  theta_hat <- utils::tail(fit$gamma, 1L)
   
   if (check_boundaries) {
     if (theta_hat < theta_min) theta_hat <- theta_min
