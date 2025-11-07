@@ -1056,7 +1056,7 @@ signpost_test_AS <- function(Y, X, U = matrix(ncol = 0, nrow = n), gammaH0 = 0, 
   # Estimate theta_hat
   if (is.infinite(lambda)) {
     if(ncol(U)>0){
-      theta_hat <- theta_inf_hat_direct(Y,X,U, beta_0, beta_a, model, "glmoffset", theta_max = theta_max)
+      theta_hat <- theta_inf_hat_direct(Y,X,U, beta_0, beta_a_hat, model, "glmoffset", theta_max = theta_max)
       beta_theta <- beta_0 + theta_hat * (beta_a_hat - beta_0)
       offset <- drop(X %*% beta_theta)
       delta <- estimate_unpenalized_delta(Y,U, offset, model)
@@ -1065,7 +1065,7 @@ signpost_test_AS <- function(Y, X, U = matrix(ncol = 0, nrow = n), gammaH0 = 0, 
                                        include_estimation_uncertainty = FALSE, 
                                        model = model, U2 = U, delta = delta))
     }else{
-      theta_hat <- theta_inf_hat(Y, X, U, beta_0, beta_a_hat, model)
+      theta_hat <- theta_inf_hat(Y, X, U = matrix(ncol=0, nrow=n), beta_0 =  beta_0, beta_a =  beta_a_hat, model =  model)
       stdef = sqrt(calc_asymptotic_variance(beta_0, beta_a, theta_hat, y2 = Y, X2 = X, 
                                        variance_type = "sandwich", 
                                        include_estimation_uncertainty = FALSE, 

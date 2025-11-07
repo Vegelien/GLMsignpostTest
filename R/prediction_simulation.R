@@ -187,8 +187,8 @@ simulate_target_gain_logistic <- function(
     print(length(beta_a_hat_pen))
     
     
-    if(ncol(U)>0){
-      theta_inf_hat_direct(Ytr,Xtr_pen,Utr_unp, beta_00_pen, beta_a_hat_pen, 
+    if(ncol(Utr_unp)>0){
+      theta_hat <- theta_inf_hat_direct(Ytr,Xtr_pen,Utr_unp, beta_00_pen, beta_a_hat_pen, 
                            model = "logistic", method = "glmoffset",
                            theta_max = theta_max, intercept = intercept)
     }else{
@@ -541,8 +541,8 @@ simulate_target_gain_logistic_LEAKAGE <- function(
     
     beta_00_pen <- if (length(beta_a_hat_pen)) rep(0, length(beta_a_hat_pen)) else numeric(0)
     
-    if(ncol(U)>0){
-      theta_inf_hat_direct(Ytr,Xtr_pen,Utr_unp, beta_00_pen, beta_a_hat_pen, 
+    if(ncol(Utr_unp)>0){
+      theta_hat <- theta_inf_hat_direct(Ytr,Xtr_pen,Utr_unp, beta_00_pen, beta_a_hat_pen, 
                            model = "logistic", method = "glmoffset",
                            theta_max = theta_max, intercept = intercept)
     }else{
