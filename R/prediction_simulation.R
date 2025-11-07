@@ -177,7 +177,7 @@ simulate_target_gain_logistic <- function(
       Utr_unp <- if (length(idx_unp)) Xtr[, idx_unp, drop = FALSE] else matrix(nrow = nrow(Xtr), ncol = 0)
       
       U_theta = if (isTRUE(intercept)) cbind(`(Intercept)` = rep(1, nrow(Xtr)), Utr_unp) else Utr_unp
-      U_theta = as.matrix(U_theta)
+      # U_theta = as.matrix(U_theta)
     }
 
     print(dim(U_theta))
@@ -186,15 +186,23 @@ simulate_target_gain_logistic <- function(
     print(length(beta_00_pen))
     print(length(beta_a_hat_pen))
     
-    theta_hat <- theta_inf_hat(
-      Y = Ytr,
-      X = Xtr_pen,
-      U = U_theta,
-      beta_0 = beta_00_pen,
-      beta_a = beta_a_hat_pen,
-      model  = "logistic",
-      theta_max = theta_max
-    )
+    
+    if(ncol(U)>0){
+      theta_inf_hat_direct(Ytr,Xtr_pen,Utr_unp, beta_00_pen, beta_a_hat_pen, 
+                           model = "logistic", method = "glmoffset",
+                           theta_max = theta_max, intercept = intercept)
+    }else{
+      theta_hat <- theta_inf_hat(
+        Y = Ytr,
+        X = Xtr_pen,
+        U = U_theta,
+        beta_0 = beta_00_pen,
+        beta_a = beta_a_hat_pen,
+        model  = "logistic",
+        theta_max = theta_max
+      )
+    }
+    
     print(theta_hat)
     
     if(theta_hat < 1e-5) {
@@ -533,15 +541,22 @@ simulate_target_gain_logistic_LEAKAGE <- function(
     
     beta_00_pen <- if (length(beta_a_hat_pen)) rep(0, length(beta_a_hat_pen)) else numeric(0)
     
-    theta_hat <- theta_inf_hat(
-      Y = Ytr,
-      X = Xtr_pen,
-      U = U_theta,
-      beta_0 = beta_00_pen,
-      beta_a = beta_a_hat_pen,
-      model  = "logistic",
-      theta_max = theta_max
-    )
+    if(ncol(U)>0){
+      theta_inf_hat_direct(Ytr,Xtr_pen,Utr_unp, beta_00_pen, beta_a_hat_pen, 
+                           model = "logistic", method = "glmoffset",
+                           theta_max = theta_max, intercept = intercept)
+    }else{
+      theta_hat <- theta_inf_hat(
+        Y = Ytr,
+        X = Xtr_pen,
+        U = U_theta,
+        beta_0 = beta_00_pen,
+        beta_a = beta_a_hat_pen,
+        model  = "logistic",
+        theta_max = theta_max
+      )
+    }
+    
     print(theta_hat)
     # Targeted vs null selection
     if (!is.finite(theta_hat) || theta_hat < 1e-5) {
@@ -1087,8 +1102,13 @@ signpost_empirical_validity_split <- function(
           
           
           if (is.infinite(lambda)) {
-            theta_inf_hat(Y_mix, X_pen, U, b0_pen, ba_pen, model, theta_min = theta_min, theta_max = theta_max)
-          } else {
+            if(ncol(U_unp)>0){
+              theta_inf_hat_direct(Y_mix,X_pen,U_unp, b0_pen, ba_pen, model, "glmoffset",theta_min = theta_min, theta_max = theta_max)
+            }else{
+              theta_inf_hat(Y_mix, X_pen, U, b0_pen, ba_pen, model, theta_min = theta_min, theta_max = theta_max)
+              
+            }
+                      } else {
             theta_hat_lambda(Y_mix, X_pen, b0_pen, ba_pen, lambda, model)
           }
         }, error = function(e) {
