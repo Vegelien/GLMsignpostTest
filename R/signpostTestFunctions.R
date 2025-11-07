@@ -1026,7 +1026,7 @@ signpost_test_AS <- function(Y, X, U = matrix(ncol = 0, nrow = n), gammaH0 = 0, 
                              estimate_beta = FALSE,
                              use_theta_hat_in_variance = FALSE,
                              fisher = FALSE, term1ONLY = FALSE,
-                             scaled = TRUE) {
+                             scaled = TRUE, theta_max = 1) {
   
   # Input validation
   if (estimate_beta && (is.null(n_beta) || is.null(lambda_beta) || is.null(Y_a) || is.null(X_a))) {
@@ -1040,9 +1040,9 @@ signpost_test_AS <- function(Y, X, U = matrix(ncol = 0, nrow = n), gammaH0 = 0, 
   if (estimate_beta) {
     # Use ridge_efficient for beta estimation
     if (model %in% c("logistic", "linear")) {
-      beta_a_hat <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta,U = U, model = model)
+      beta_a_hat <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta, model = model)
     } else if (model == "poisson") {
-      result <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta, U = U, model = model)
+      result <- ridge_efficient(Y = Y_a, X = X_a, lambda = lambda_beta, model = model)
       beta_a_hat <- result$penalized
     }
     
@@ -1055,40 +1055,63 @@ signpost_test_AS <- function(Y, X, U = matrix(ncol = 0, nrow = n), gammaH0 = 0, 
   
   # Estimate theta_hat
   if (is.infinite(lambda)) {
-    theta_hat <- theta_inf_hat(Y, X, U, beta_0, beta_a_hat, model)
+    if(ncol(U)>0){
+      theta_hat <- theta_inf_hat_direct(Y,X,U, beta_0, beta_a, model, "glmoffset", theta_max = theta_max)
+      beta_theta <- beta_0 + theta_hat * (beta_a_hat - beta_0)
+      offset <- drop(X %*% beta_theta)
+      delta <- estimate_unpenalized_delta(Y,U, offset, model)
+      stdef = sqrt(calc_asymptotic_variance(beta_0, beta_a, theta_hat, y2 = Y, X2 = X, 
+                                       variance_type = "sandwich", 
+                                       include_estimation_uncertainty = FALSE, 
+                                       model = model, U2 = U, delta = delta))
+    }else{
+      theta_hat <- theta_inf_hat(Y, X, U, beta_0, beta_a_hat, model)
+      stdef = sqrt(calc_asymptotic_variance(beta_0, beta_a, theta_hat, y2 = Y, X2 = X, 
+                                       variance_type = "sandwich", 
+                                       include_estimation_uncertainty = FALSE, 
+                                       model = model))
+    }
+    
   } else {
     theta_hat <- theta_hat_lambda(Y, X, U, beta_0, beta_a_hat, lambda, model)
+    stdef = sqrt(calc_asymptotic_variance(beta_0, beta_a, theta_hat, y2 = Y, X2 = X, 
+                                          variance_type = "sandwich", 
+                                          include_estimation_uncertainty = FALSE, 
+                                          model = model))
   }
   
-  # Calculate standard error
-  if (fisher) {
-    # Fisher information approach
-    if (use_theta_hat_in_variance) {
-      diff_beta <- X %*% (beta_a_hat - beta_0)
-      lp0 <- ((1 - theta_hat) * beta_0 + theta_hat * beta_a_hat) %*% t(X)
-      ddg <- diag(c(exp(-lp0) / (1 + exp(-lp0))^2))
-      Fisher_info <- as.numeric(t(diff_beta) %*% ddg %*% diff_beta)
-      stdef <- sqrt(1 / Fisher_info)
-    } else {
-      diff_beta <- X %*% (beta_a_hat - beta_0)
-      lp0 <- beta_0 %*% t(X)
-      ddg <- diag(c(exp(-lp0) / (1 + exp(-lp0))^2))
-      Fisher_info <- as.numeric(t(diff_beta) %*% ddg %*% diff_beta)
-      stdef <- sqrt(1 / Fisher_info)
-    }
-  } else {
-    # Asymptotic variance approach
-    theta2_for_variance <- if (use_theta_hat_in_variance) theta_hat else 0
-    v22 <- calc_V22(beta_0 = beta_0, beta_a = beta_a_hat, theta2 = theta2_for_variance, 
-                    y1 = Y_a, y2 = Y, X1 = X_a, X2 = X, lambda_beta = lambda_beta, 
-                    term1ONLY = term1ONLY)
-    
-    if (!is.finite(v22) || v22 <= 0) {
-      warning("Invalid variance estimate")
-      return(list(p_value = NA, theta_hat = theta_hat, std_error = NA))
-    }
-    stdef <- sqrt(v22)
-  }
+  # # Calculate standard error
+  
+  
+  
+  # if (fisher) {
+  #   # Fisher information approach
+  #   if (use_theta_hat_in_variance) {
+  #     diff_beta <- X %*% (beta_a_hat - beta_0)
+  #     lp0 <- ((1 - theta_hat) * beta_0 + theta_hat * beta_a_hat) %*% t(X)
+  #     ddg <- diag(c(exp(-lp0) / (1 + exp(-lp0))^2))
+  #     Fisher_info <- as.numeric(t(diff_beta) %*% ddg %*% diff_beta)
+  #     stdef <- sqrt(1 / Fisher_info)
+  #   } else {
+  #     diff_beta <- X %*% (beta_a_hat - beta_0)
+  #     lp0 <- beta_0 %*% t(X)
+  #     ddg <- diag(c(exp(-lp0) / (1 + exp(-lp0))^2))
+  #     Fisher_info <- as.numeric(t(diff_beta) %*% ddg %*% diff_beta)
+  #     stdef <- sqrt(1 / Fisher_info)
+  #   }
+  # } else {
+  #   # Asymptotic variance approach
+  #   theta2_for_variance <- if (use_theta_hat_in_variance) theta_hat else 0
+  #   v22 <- calc_V22(beta_0 = beta_0, beta_a = beta_a_hat, theta2 = theta2_for_variance, 
+  #                   y1 = Y_a, y2 = Y, X1 = X_a, X2 = X, lambda_beta = lambda_beta, 
+  #                   term1ONLY = term1ONLY)
+  #   
+  #   if (!is.finite(v22) || v22 <= 0) {
+  #     warning("Invalid variance estimate")
+  #     return(list(p_value = NA, theta_hat = theta_hat, std_error = NA))
+  #   }
+  #   stdef <- sqrt(v22)
+  # }
   
   # Compute p-value
   if (gammaH0 == 0) {
