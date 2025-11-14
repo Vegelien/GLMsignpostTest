@@ -364,7 +364,7 @@ theta_inf_hat_direct <- function(
   U <- as.matrix(U)
   
   # Fallback to root-based when U is empty.
-  if (ncol(U) == 0) {
+  if (ncol(U) == 0 && isFALSE(intercept)) {
     return(theta_inf_hat(Y, X, U, beta_0, beta_a, model,
                          theta_min = theta_min, theta_max = theta_max,
                          do_rotation = FALSE))
