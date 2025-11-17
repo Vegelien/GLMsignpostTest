@@ -347,7 +347,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_theta,
+          y = theta_hat,
           group = interaction(gamma, rho),
           color = factor(rho)
         ),
@@ -358,7 +358,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_theta,
+          y = theta_hat,
           color = factor(rho)
         ),
         inherit.aes = FALSE,
@@ -612,7 +612,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_relative_improvement,
+          y = relative_improvement,
           group = interaction(gamma, rho),
           color = factor(rho)
         ),
@@ -623,7 +623,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_relative_improvement,
+          y = relative_improvement,
           color = factor(rho)
         ),
         inherit.aes = FALSE,
