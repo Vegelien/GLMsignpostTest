@@ -267,7 +267,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         (spec_label == "Misspecified\n(Estimated)" & (is.na(rho_boxplot) | rho == rho_boxplot))
     )
 
-  line_data <- theta_data %>%
+  median_line_data <- theta_data %>%
     filter(spec_label == "Misspecified\n(Estimated)", rho %in% line_rhos) %>%
     group_by(spec_label, rho, n, gamma) %>%
     summarise(theta_hat = median(theta_hat, na.rm = TRUE), .groups = "drop")
@@ -281,7 +281,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       n_pos = match(n, n_levels)
     )
 
-  line_data <- line_data %>%
+  median_line_data <- median_line_data %>%
     arrange(n, rho, gamma) %>%
     mutate(
       n_pos = match(n, n_levels),
@@ -295,7 +295,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       position = position_dodge(width = dodge_width)
     ) +
     geom_line(
-      data = line_data,
+      data = median_line_data,
       aes(
         x = x_pos,
         group = interaction(n, rho),
@@ -306,7 +306,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       position = position_identity()
     ) +
     geom_point(
-      data = line_data,
+      data = median_line_data,
       aes(x = x_pos, color = factor(gamma), shape = factor(rho)),
       size = 1.5,
       position = position_identity()
@@ -532,7 +532,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         (spec_label == "Misspecified\n(Estimated)" & (is.na(rho_boxplot) | rho == rho_boxplot))
     )
 
-  line_data <- loss_data %>%
+  median_line_data <- loss_data %>%
     filter(spec_label == "Misspecified\n(Estimated)", rho %in% line_rhos) %>%
     group_by(spec_label, rho, n, gamma) %>%
     summarise(relative_improvement = median(relative_improvement, na.rm = TRUE), .groups = "drop")
@@ -546,7 +546,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
       n_pos = match(n, n_levels)
     )
 
-  line_data <- line_data %>%
+  median_line_data <- median_line_data %>%
     arrange(n, rho, gamma) %>%
     mutate(
       n_pos = match(n, n_levels),
@@ -560,7 +560,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
       position = position_dodge(width = dodge_width)
     ) +
     geom_line(
-      data = line_data,
+      data = median_line_data,
       aes(
         x = x_pos,
         group = interaction(n, rho),
@@ -571,7 +571,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
       position = position_identity()
     ) +
     geom_point(
-      data = line_data,
+      data = median_line_data,
       aes(x = x_pos, color = factor(gamma), shape = factor(rho)),
       size = 1.5,
       position = position_identity()
