@@ -209,20 +209,18 @@ load_theta_hat_data <- function(db_path = "estimation_simulations.db",
 #' @param db_path Path to estimation database
 #' @param model_filter Filter by GLM_model
 #' @param lambda_filter Filter by lambda
-#' @param rho_filter Optional vector of rho values to include (use NA to keep
-#'   missing values)
-#' @param misspecified_boxplot_rho rho value to use for misspecified boxplots
-#' @param misspecified_median_rho Vector of rho values to display as median
-#'   trend lines in the misspecified panel
+#' @param rho_boxplot Rho value to use for boxplots in the misspecified case
+#'   (NULL defaults to the first available)
+#' @param rho_median_lines Numeric vector of rho values to plot as median-only
+#'   lines in the misspecified case
 #' @return ggplot object
 plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
                                         model_filter = "logistic",
                                         lambda_filter = Inf,
-                                        rho_filter = NULL,
-                                        misspecified_boxplot_rho = NULL,
-                                        misspecified_median_rho = NULL) {
-
-  theta_data <- load_theta_hat_data(db_path, model_filter, lambda_filter, rho_filter)
+                                        rho_boxplot = NULL,
+                                        rho_median_lines = numeric(0)) {
+  
+  theta_data <- load_theta_hat_data(db_path, model_filter, lambda_filter)
   
   # Filter to only 3 specifications
   theta_data <- theta_data %>%
@@ -244,33 +242,80 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
     ) %>%
     filter(!is.na(spec_label))
 
-  misspecified_rhos <- theta_data %>%
-    filter(model_specification == "misspecified") %>%
-    pull(rho) %>%
-    unique()
+  # Determine rho values to show for misspecified case
+  misspecified_data <- theta_data %>%
+    filter(spec_label == "Misspecified\n(Estimated)")
 
-  if (is.null(misspecified_boxplot_rho) && length(misspecified_rhos) > 0) {
-    misspecified_boxplot_rho <- misspecified_rhos[[1]]
+  available_rho <- sort(unique(misspecified_data$rho[!is.na(misspecified_data$rho)]))
+
+  rho_boxplot <- if (is.null(rho_boxplot)) {
+    if (length(available_rho) > 0) {
+      available_rho[1]
+    } else {
+      NA_real_
+    }
+  } else {
+    rho_boxplot
   }
 
-  if (is.null(misspecified_median_rho)) {
-    misspecified_median_rho <- setdiff(misspecified_rhos, misspecified_boxplot_rho)
-  }
+  line_rhos <- rho_median_lines[!is.na(rho_median_lines)]
+  line_rhos <- intersect(line_rhos, setdiff(available_rho, rho_boxplot))
 
   boxplot_data <- theta_data %>%
-    filter(model_specification != "misspecified" |
-             (is.na(rho) & is.na(misspecified_boxplot_rho)) |
-             (!is.na(rho) & rho == misspecified_boxplot_rho))
+    filter(
+      spec_label != "Misspecified\n(Estimated)" |
+        (spec_label == "Misspecified\n(Estimated)" & (is.na(rho_boxplot) | rho == rho_boxplot))
+    )
 
-  median_line_data <- theta_data %>%
-    filter(model_specification == "misspecified",
-           (!is.na(rho) & rho %in% misspecified_median_rho)) %>%
-    group_by(n, gamma, spec_label, rho) %>%
-    summarise(median_theta = median(theta_hat, na.rm = TRUE), .groups = "drop")
+  line_data <- theta_data %>%
+    filter(spec_label == "Misspecified\n(Estimated)", rho %in% line_rhos) %>%
+    group_by(spec_label, rho, n, gamma) %>%
+    summarise(theta_hat = median(theta_hat, na.rm = TRUE), .groups = "drop")
 
-  p <- ggplot(boxplot_data, aes(x = factor(n), y = theta_hat, fill = factor(gamma))) +
-    geom_boxplot(outlier.shape = NA) +
+  dodge_width <- 0.75
+  n_levels <- sort(unique(theta_data$n))
+  gamma_levels <- sort(unique(theta_data$gamma))
+
+  boxplot_data <- boxplot_data %>%
+    mutate(
+      n_pos = match(n, n_levels)
+    )
+
+  line_data <- line_data %>%
+    arrange(n, rho, gamma) %>%
+    mutate(
+      n_pos = match(n, n_levels),
+      x_pos = n_pos + dodge_width * ((match(gamma, gamma_levels) - 0.5) / length(gamma_levels) - 0.5)
+    )
+
+  p <- ggplot(boxplot_data, aes(x = n_pos, y = theta_hat)) +
+    geom_boxplot(
+      aes(fill = factor(gamma), group = interaction(n_pos, gamma)),
+      outlier.shape = NA,
+      position = position_dodge(width = dodge_width)
+    ) +
+    geom_line(
+      data = line_data,
+      aes(
+        x = x_pos,
+        group = interaction(n, rho),
+        linetype = factor(rho)
+      ),
+      color = "black",
+      size = 0.8,
+      position = position_identity()
+    ) +
+    geom_point(
+      data = line_data,
+      aes(x = x_pos, color = factor(gamma), shape = factor(rho)),
+      size = 1.5,
+      position = position_identity()
+    ) +
     facet_grid(. ~ spec_label) +
+    scale_x_continuous(
+      breaks = seq_along(n_levels),
+      labels = n_levels
+    ) +
     scale_y_continuous(breaks = pretty_breaks()) +
     coord_cartesian(ylim = c(0, 1)) +
     labs(
@@ -278,12 +323,16 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       x = "Sample Size (n)",
       y = expression(hat(theta)),
       fill = expression(gamma),
-      color = expression(rho)
+      color = expression(gamma),
+      linetype = expression(rho),
+      shape = expression(rho)
     ) +
     theme_minimal() +
     guides(
       fill = guide_legend(nrow = 1, byrow = TRUE, title.position = "left"),
-      color = guide_legend(title.position = "left")
+      color = guide_legend(nrow = 1, byrow = TRUE, title.position = "left"),
+      linetype = guide_legend(nrow = 1, byrow = TRUE, title.position = "left"),
+      shape = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")
     ) +
     theme(
       text = element_text(size = 11),
@@ -425,19 +474,19 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
 #'   missing values)
 #' @param y_limits Numeric vector of length 2 giving y-axis limits for the
 #'   relative improvement plot
-#' @param misspecified_boxplot_rho rho value to use for misspecified boxplots
-#' @param misspecified_median_rho Vector of rho values to display as median
-#'   trend lines in the misspecified panel
+#' @param rho_boxplot Rho value to use for boxplots in the misspecified case
+#'   (NULL defaults to the first available)
+#' @param rho_median_lines Numeric vector of rho values to plot as median-only
+#'   lines in the misspecified case
 #' @return ggplot object
 plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db",
                                            model_filter = "logistic",
                                            lambda_filter = Inf,
-                                           rho_filter = NULL,
                                            y_limits = c(-1, 1),
-                                           misspecified_boxplot_rho = NULL,
-                                           misspecified_median_rho = NULL) {
-
-  loss_data <- load_loss_data(db_path, model_filter, lambda_filter, rho_filter)
+                                           rho_boxplot = NULL,
+                                           rho_median_lines = numeric(0)) {
+  
+  loss_data <- load_loss_data(db_path, model_filter, lambda_filter)
   
   # Filter to only 3 specifications
   loss_data <- loss_data %>%
@@ -459,33 +508,79 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
     ) %>%
     filter(!is.na(spec_label))
 
-  misspecified_rhos <- loss_data %>%
-    filter(model_specification == "misspecified") %>%
-    pull(rho) %>%
-    unique()
+  misspecified_data <- loss_data %>%
+    filter(spec_label == "Misspecified\n(Estimated)")
 
-  if (is.null(misspecified_boxplot_rho) && length(misspecified_rhos) > 0) {
-    misspecified_boxplot_rho <- misspecified_rhos[[1]]
+  available_rho <- sort(unique(misspecified_data$rho[!is.na(misspecified_data$rho)]))
+
+  rho_boxplot <- if (is.null(rho_boxplot)) {
+    if (length(available_rho) > 0) {
+      available_rho[1]
+    } else {
+      NA_real_
+    }
+  } else {
+    rho_boxplot
   }
 
-  if (is.null(misspecified_median_rho)) {
-    misspecified_median_rho <- setdiff(misspecified_rhos, misspecified_boxplot_rho)
-  }
+  line_rhos <- rho_median_lines[!is.na(rho_median_lines)]
+  line_rhos <- intersect(line_rhos, setdiff(available_rho, rho_boxplot))
 
   boxplot_data <- loss_data %>%
-    filter(model_specification != "misspecified" |
-             (is.na(rho) & is.na(misspecified_boxplot_rho)) |
-             (!is.na(rho) & rho == misspecified_boxplot_rho))
+    filter(
+      spec_label != "Misspecified\n(Estimated)" |
+        (spec_label == "Misspecified\n(Estimated)" & (is.na(rho_boxplot) | rho == rho_boxplot))
+    )
 
-  median_line_data <- loss_data %>%
-    filter(model_specification == "misspecified",
-           (!is.na(rho) & rho %in% misspecified_median_rho)) %>%
-    group_by(n, gamma, spec_label, rho) %>%
-    summarise(median_relative_improvement = median(relative_improvement, na.rm = TRUE), .groups = "drop")
+  line_data <- loss_data %>%
+    filter(spec_label == "Misspecified\n(Estimated)", rho %in% line_rhos) %>%
+    group_by(spec_label, rho, n, gamma) %>%
+    summarise(relative_improvement = median(relative_improvement, na.rm = TRUE), .groups = "drop")
 
-  p <- ggplot(boxplot_data, aes(x = factor(n), y = relative_improvement, fill = factor(gamma))) +
-    geom_boxplot(outlier.shape = NA) +
+  dodge_width <- 0.75
+  n_levels <- sort(unique(loss_data$n))
+  gamma_levels <- sort(unique(loss_data$gamma))
+
+  boxplot_data <- boxplot_data %>%
+    mutate(
+      n_pos = match(n, n_levels)
+    )
+
+  line_data <- line_data %>%
+    arrange(n, rho, gamma) %>%
+    mutate(
+      n_pos = match(n, n_levels),
+      x_pos = n_pos + dodge_width * ((match(gamma, gamma_levels) - 0.5) / length(gamma_levels) - 0.5)
+    )
+
+  p <- ggplot(boxplot_data, aes(x = n_pos, y = relative_improvement)) +
+    geom_boxplot(
+      aes(fill = factor(gamma), group = interaction(n_pos, gamma)),
+      outlier.shape = NA,
+      position = position_dodge(width = dodge_width)
+    ) +
+    geom_line(
+      data = line_data,
+      aes(
+        x = x_pos,
+        group = interaction(n, rho),
+        linetype = factor(rho)
+      ),
+      color = "black",
+      size = 0.8,
+      position = position_identity()
+    ) +
+    geom_point(
+      data = line_data,
+      aes(x = x_pos, color = factor(gamma), shape = factor(rho)),
+      size = 1.5,
+      position = position_identity()
+    ) +
     facet_grid(. ~ spec_label) +
+    scale_x_continuous(
+      breaks = seq_along(n_levels),
+      labels = n_levels
+    ) +
     scale_y_continuous(breaks = pretty_breaks()) +
     coord_cartesian(ylim = y_limits) +
     labs(
@@ -493,12 +588,16 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
       x = "Sample Size (n)",
       y = "Relative Improvement",
       fill = expression(gamma),
-      color = expression(rho)
+      color = expression(gamma),
+      linetype = expression(rho),
+      shape = expression(rho)
     ) +
     theme_minimal() +
     guides(
       fill = guide_legend(nrow = 1, byrow = TRUE, title.position = "left"),
-      color = guide_legend(title.position = "left")
+      color = guide_legend(nrow = 1, byrow = TRUE, title.position = "left"),
+      linetype = guide_legend(nrow = 1, byrow = TRUE, title.position = "left"),
+      shape = guide_legend(nrow = 1, byrow = TRUE, title.position = "left")
     ) +
     theme(
       text = element_text(size = 11),
@@ -554,39 +653,38 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
 #' @param y_limits Numeric vector of length 2 giving y-axis limits for the
 #'   relative improvement plot
 #' @param save_plots Logical, whether to save plots as PNG
+#' @param theta_rho_boxplot Rho value to use for theta_hat boxplots in the
+#'   misspecified case (NULL defaults to the first available)
+#' @param theta_rho_median_lines Numeric vector of rho values to display as
+#'   median-only lines for theta_hat in the misspecified case
+#' @param loss_rho_boxplot Rho value to use for loss boxplots in the misspecified
+#'   case (NULL defaults to the first available)
+#' @param loss_rho_median_lines Numeric vector of rho values to display as
+#'   median-only lines for loss in the misspecified case
 #' @return List of ggplot objects
 generate_all_plots <- function(power_db = "power_simulations.db",
                                estimation_db = "estimation_simulations.db",
-                               model_filter = "logistic",
-                               lambda_filter = Inf,
-                               rho_filter = NULL,
-                               misspecified_boxplot_rho = NULL,
-                               misspecified_median_rho = NULL,
-                               y_limits = c(-1, 1),
-                               save_plots = TRUE) {
-
+                               save_plots = TRUE,
+                               theta_rho_boxplot = NULL,
+                               theta_rho_median_lines = numeric(0),
+                               loss_rho_boxplot = NULL,
+                               loss_rho_median_lines = numeric(0)) {
+  
   message("Creating power plot...")
   p1 <- plot_power_comparison(power_db, model_filter, rho_filter)
 
   message("Creating theta_hat distribution plot...")
   p2 <- plot_theta_hat_distribution(
     estimation_db,
-    model_filter,
-    lambda_filter,
-    rho_filter,
-    misspecified_boxplot_rho,
-    misspecified_median_rho
+    rho_boxplot = theta_rho_boxplot,
+    rho_median_lines = theta_rho_median_lines
   )
 
   message("Creating relative loss improvement plot...")
   p3 <- plot_relative_loss_improvement(
     estimation_db,
-    model_filter,
-    lambda_filter,
-    rho_filter,
-    y_limits,
-    misspecified_boxplot_rho,
-    misspecified_median_rho
+    rho_boxplot = loss_rho_boxplot,
+    rho_median_lines = loss_rho_median_lines
   )
   
   if (save_plots) {
