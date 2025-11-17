@@ -273,17 +273,22 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
     summarise(theta_hat = median(theta_hat, na.rm = TRUE), .groups = "drop")
 
   dodge_width <- 0.75
-  n_levels <- sort(unique(theta_data$n))
-  gamma_levels <- sort(unique(theta_data$gamma))
+  n_levels <- sort(unique(as.numeric(theta_data$n)))
+  gamma_levels <- sort(unique(as.numeric(theta_data$gamma)))
 
   boxplot_data <- boxplot_data %>%
     mutate(
+      n = as.numeric(n),
+      gamma = as.numeric(gamma),
       n_pos = match(n, n_levels)
     )
 
   median_line_data <- median_line_data %>%
     arrange(n, rho, gamma) %>%
     mutate(
+      n = as.numeric(n),
+      rho = as.numeric(rho),
+      gamma = as.numeric(gamma),
       n_pos = match(n, n_levels),
       x_pos = n_pos + dodge_width * ((match(gamma, gamma_levels) - 0.5) / length(gamma_levels) - 0.5)
     )
@@ -347,7 +352,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_theta,
+          y = theta_hat,
           group = interaction(gamma, rho),
           color = factor(rho)
         ),
@@ -358,7 +363,7 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_theta,
+          y = theta_hat,
           color = factor(rho)
         ),
         inherit.aes = FALSE,
@@ -538,17 +543,22 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
     summarise(relative_improvement = median(relative_improvement, na.rm = TRUE), .groups = "drop")
 
   dodge_width <- 0.75
-  n_levels <- sort(unique(loss_data$n))
-  gamma_levels <- sort(unique(loss_data$gamma))
+  n_levels <- sort(unique(as.numeric(loss_data$n)))
+  gamma_levels <- sort(unique(as.numeric(loss_data$gamma)))
 
   boxplot_data <- boxplot_data %>%
     mutate(
+      n = as.numeric(n),
+      gamma = as.numeric(gamma),
       n_pos = match(n, n_levels)
     )
 
   median_line_data <- median_line_data %>%
     arrange(n, rho, gamma) %>%
     mutate(
+      n = as.numeric(n),
+      rho = as.numeric(rho),
+      gamma = as.numeric(gamma),
       n_pos = match(n, n_levels),
       x_pos = n_pos + dodge_width * ((match(gamma, gamma_levels) - 0.5) / length(gamma_levels) - 0.5)
     )
@@ -612,7 +622,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_relative_improvement,
+          y = relative_improvement,
           group = interaction(gamma, rho),
           color = factor(rho)
         ),
@@ -623,7 +633,7 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
         data = median_line_data,
         aes(
           x = factor(n),
-          y = median_relative_improvement,
+          y = relative_improvement,
           color = factor(rho)
         ),
         inherit.aes = FALSE,
