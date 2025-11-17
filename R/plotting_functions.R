@@ -50,9 +50,12 @@ create_power_view <- function(db_path = "power_simulations.db") {
 #' 
 #' @param db_path Path to power database
 #' @param model_filter Filter by GLM_model (default: "logistic")
+#' @param rho_filter Optional vector of rho values to include (use NA to keep
+#'   missing values)
 #' @return ggplot object
 plot_power_comparison <- function(db_path = "power_simulations.db",
-                                  model_filter = "logistic") {
+                                  model_filter = "logistic",
+                                  rho_filter = NULL) {
   
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
@@ -63,6 +66,11 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
   # Filter by model
   power_data <- power_data %>%
     filter(GLM_model == model_filter)
+
+  if (!is.null(rho_filter)) {
+    power_data <- power_data %>%
+      filter((is.na(rho) & any(is.na(rho_filter))) | (!is.na(rho) & rho %in% rho_filter))
+  }
 
   # Create specification label - only 3 categories
   power_data <- power_data %>%
@@ -141,14 +149,17 @@ plot_power_comparison <- function(db_path = "power_simulations.db",
 #' Load Raw Theta_hat Data
 #' 
 #' Loads all individual theta_hat results for boxplots
-#' 
+#'
 #' @param db_path Path to estimation database
 #' @param model_filter Filter by GLM_model
 #' @param lambda_filter Filter by lambda
+#' @param rho_filter Optional vector of rho values to include (use NA to keep
+#'   missing values)
 #' @return Data frame in long format
 load_theta_hat_data <- function(db_path = "estimation_simulations.db",
                                 model_filter = "logistic",
-                                lambda_filter = Inf) {
+                                lambda_filter = Inf,
+                                rho_filter = NULL) {
   
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
@@ -164,8 +175,13 @@ load_theta_hat_data <- function(db_path = "estimation_simulations.db",
     JOIN parameters p ON p.id = r.param_id
     WHERE p.GLM_model = ? AND p.lambda = ?
   "
-  
+
   df <- dbGetQuery(con, query, params = list(model_filter, lambda_filter))
+
+  if (!is.null(rho_filter)) {
+    df <- df %>%
+      filter((is.na(rho) & any(is.na(rho_filter))) | (!is.na(rho) & rho %in% rho_filter))
+  }
   
   # Extract theta_hat columns
   theta_cols <- grep("^theta_hat\\d\\d$", names(df), value = TRUE)
@@ -324,6 +340,31 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
       legend.position = "bottom",
       legend.box = "horizontal"
     )
+
+  if (nrow(median_line_data) > 0) {
+    p <- p +
+      geom_line(
+        data = median_line_data,
+        aes(
+          x = factor(n),
+          y = median_theta,
+          group = interaction(gamma, rho),
+          color = factor(rho)
+        ),
+        inherit.aes = FALSE,
+        linewidth = 0.7
+      ) +
+      geom_point(
+        data = median_line_data,
+        aes(
+          x = factor(n),
+          y = median_theta,
+          color = factor(rho)
+        ),
+        inherit.aes = FALSE,
+        size = 1.5
+      )
+  }
   
   return(p)
 }
@@ -336,14 +377,17 @@ plot_theta_hat_distribution <- function(db_path = "estimation_simulations.db",
 #' Load Loss Data
 #' 
 #' Loads target loss, null loss, and calculates relative improvement
-#' 
+#'
 #' @param db_path Path to estimation database
 #' @param model_filter Filter by GLM_model
 #' @param lambda_filter Filter by lambda
+#' @param rho_filter Optional vector of rho values to include (use NA to keep
+#'   missing values)
 #' @return Data frame in long format
 load_loss_data <- function(db_path = "estimation_simulations.db",
                            model_filter = "logistic",
-                           lambda_filter = Inf) {
+                           lambda_filter = Inf,
+                           rho_filter = NULL) {
   
   con <- dbConnect(SQLite(), db_path)
   on.exit(dbDisconnect(con), add = TRUE)
@@ -363,8 +407,13 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
     JOIN estimation_settings e ON e.id = r.estimation_id
     WHERE p.GLM_model = ? AND p.lambda = ?
   "
-  
+
   df <- dbGetQuery(con, query, params = list(model_filter, lambda_filter))
+
+  if (!is.null(rho_filter)) {
+    df <- df %>%
+      filter((is.na(rho) & any(is.na(rho_filter))) | (!is.na(rho) & rho %in% rho_filter))
+  }
   
   # Extract columns
   target_cols <- grep("^target_loss\\d\\d$", names(df), value = TRUE)
@@ -421,6 +470,8 @@ load_loss_data <- function(db_path = "estimation_simulations.db",
 #' @param db_path Path to estimation database
 #' @param model_filter Filter by GLM_model
 #' @param lambda_filter Filter by lambda
+#' @param rho_filter Optional vector of rho values to include (use NA to keep
+#'   missing values)
 #' @param y_limits Numeric vector of length 2 giving y-axis limits for the
 #'   relative improvement plot
 #' @param rho_boxplot Rho value to use for boxplots in the misspecified case
@@ -554,6 +605,31 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
       legend.position = "bottom",
       legend.box = "horizontal"
     )
+
+  if (nrow(median_line_data) > 0) {
+    p <- p +
+      geom_line(
+        data = median_line_data,
+        aes(
+          x = factor(n),
+          y = median_relative_improvement,
+          group = interaction(gamma, rho),
+          color = factor(rho)
+        ),
+        inherit.aes = FALSE,
+        linewidth = 0.7
+      ) +
+      geom_point(
+        data = median_line_data,
+        aes(
+          x = factor(n),
+          y = median_relative_improvement,
+          color = factor(rho)
+        ),
+        inherit.aes = FALSE,
+        size = 1.5
+      )
+  }
   
   return(p)
 }
@@ -567,6 +643,15 @@ plot_relative_loss_improvement <- function(db_path = "estimation_simulations.db"
 #' 
 #' @param power_db Path to power database
 #' @param estimation_db Path to estimation database
+#' @param model_filter GLM model to plot
+#' @param lambda_filter Lambda value to filter estimation plots
+#' @param rho_filter Optional vector of rho values to include (use NA to keep
+#'   missing values)
+#' @param misspecified_boxplot_rho rho value to use for misspecified boxplots
+#' @param misspecified_median_rho Vector of rho values to display as median
+#'   trend lines in the misspecified panel
+#' @param y_limits Numeric vector of length 2 giving y-axis limits for the
+#'   relative improvement plot
 #' @param save_plots Logical, whether to save plots as PNG
 #' @param theta_rho_boxplot Rho value to use for theta_hat boxplots in the
 #'   misspecified case (NULL defaults to the first available)
@@ -586,8 +671,8 @@ generate_all_plots <- function(power_db = "power_simulations.db",
                                loss_rho_median_lines = numeric(0)) {
   
   message("Creating power plot...")
-  p1 <- plot_power_comparison(power_db)
-  
+  p1 <- plot_power_comparison(power_db, model_filter, rho_filter)
+
   message("Creating theta_hat distribution plot...")
   p2 <- plot_theta_hat_distribution(
     estimation_db,
